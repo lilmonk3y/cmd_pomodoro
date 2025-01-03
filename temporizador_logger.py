@@ -24,18 +24,19 @@ def timer_audio():
     if exit_code:
         os.system("google-chrome "+PATH_VIDEO)
 
-def log(now, tags):
-    text = pomo_log_line_entry(now, tags)
+def log(now, tag):
+    text = pomo_log_line_entry(now, tag)
     with open(path_of_log_file(), "a") as log:
         log.write("\n" + text )
     play_sound()
 
-def pomo_log_line_entry(now, tags):
+def pomo_log_line_entry(now, tag):
     date = now.strftime("%y-%m-%d")
     time_str = now.strftime("%H:%M")
     text = "🍅 {} , {}".format( date, time_str)
-    if tags:
-        text = text + " , #{}".format(tags[0])
+    text = "🍅 {} , {}".format(date, time_str)
+    if tag:
+        text = text + " , #{}".format(tag)
     return text 
 
 def path_of_log_file():
@@ -58,9 +59,9 @@ minutes_count = TIME_PERIOD
 if len(sys.argv) > 1:
     minutes_count = int(sys.argv[1])
 
-tags = []
+tag = None
 if len(sys.argv) > 2:
-    tags.append(sys.argv[2])
+    tag = sys.argv[2]
 
 seconds = minutes_count * 60
 
@@ -70,7 +71,7 @@ try:
         print_pending_time(seconds)
         if must_log(since_last_pomodoro, POMODORO_TIME):
             now = datetime.now()
-            log(now, tags)
+            log(now, tag)
         time.sleep(1)
         seconds -= 1
         since_last_pomodoro += 1
