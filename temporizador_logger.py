@@ -48,9 +48,6 @@ def play_sound():
 def path_to_file(path):
     return os.path.join(os.path.expanduser('~'), path)
 
-def list_of_timestamps(minutes_of_timer):
-    return [i * POMODORO_TIME for i in range(1, minutes_of_timer//POMODORO_TIME + 1)]
-
 def must_log(seconds_since_last_pomodoro, pomodoro_duration_in_minutes):
     pomodoro_in_seconds = 60 * pomodoro_duration_in_minutes
     return seconds_since_last_pomodoro == pomodoro_in_seconds
@@ -66,7 +63,6 @@ if len(sys.argv) > 2:
     tags.append(sys.argv[2])
 
 seconds = minutes_count * 60
-log_timestamps = list_of_timestamps(minutes_count)
 
 try:
     since_last_pomodoro = 0
