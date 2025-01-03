@@ -14,10 +14,53 @@ from datetime import datetime, timedelta
 import os
 import sys
 from playsound import playsound
+import multiprocessing
+import keyboard
+
+##### timer #####
+
+def timer(timer_pipe, sys_argv):
+    """Timer process manages the pomodoros and the logging of them"""
+
+    minutes_count = TIME_PERIOD
+    if len(sys_argv) > 1:
+        minutes_count = int(sys_argv[1])
+
+    tag = None
+    if len(sys_argv) > 2:
+        tag = sys_argv[2]
+
+    seconds = minutes_count * 60
+    since_last_pomodoro = 0
+    paused = False
+
+    while 0 <= seconds:
+        if timer_pipe.poll():
+            msg = timer_pipe.recv()
+
+            if msg == "pause":
+                paused = True
+            elif msg == "continue":
+                paused = False
+            elif msg == "stop":
+                break
+            else:
+                raise RuntimeError(f"Message {msg} is unhandled by timer")
+
+        if paused:
+            continue
+
+        print_pending_time(seconds)
+        if must_log(since_last_pomodoro, POMODORO_TIME):
+            now = datetime.now()
+            log(now, tag)
+        time.sleep(1)
+        seconds -= 1
+        since_last_pomodoro += 1
 
 def print_pending_time(seconds):
     time_str = "{:02d}:{:02d}:{:02d}".format(seconds//3600, (seconds//60) % 60, seconds % 60)
-    print("Faltan para terminar: {}".format(time_str) , end="\r")
+    print("Faltan para terminar: {}".format(time_str) , end="\r") # flush=True
 
 def timer_audio():
     exit_code = os.system("open "+PATH_PC)
@@ -52,31 +95,68 @@ def must_log(seconds_since_last_pomodoro, pomodoro_duration_in_minutes):
     pomodoro_in_seconds = 60 * pomodoro_duration_in_minutes
     return seconds_since_last_pomodoro == pomodoro_in_seconds
 
-##### main #####
+##### main - keyboard manager #####
 
-minutes_count = TIME_PERIOD
-if len(sys.argv) > 1:
-    minutes_count = int(sys.argv[1])
+def main():
+    main_pipe, timer_pipe = multiprocessing.Pipe()
 
-tag = None
-if len(sys.argv) > 2:
-    tag = sys.argv[2]
+    timer_process = multiprocessing.Process(target=timer, args=(timer_pipe, sys.argv))
+    timer_process.start()
 
-seconds = minutes_count * 60
+    while True:
+        if main_pipe.poll():
+            msg = main_pipe.recv()
 
-try:
-    since_last_pomodoro = 0
-    while 0 <= seconds:
-        print_pending_time(seconds)
-        if must_log(since_last_pomodoro, POMODORO_TIME):
-            now = datetime.now()
-            log(now, tag)
-        time.sleep(1)
-        seconds -= 1
-        since_last_pomodoro += 1
+            if msg == "finished":
+                timer_audio()
+                print("\nFelicitaciones por el período de estudio! Te mereces un descanso.")
 
-    timer_audio()
-    print("\nFelicitaciones por el período de estudio! Te mereces un descanso.")
+            elif msg == "stoped":
+                print("\nRelog apagado")
 
-except KeyboardInterrupt:
-    print("\nRelog apagado")
+            else:
+                raise RuntimeError(f"Message {msg} is unhandled by main process")
+
+        try:
+            if keyboard.is_pressed("p"): 
+                print("\nCuenta atrás pausada.")
+                main_pipe.send("pause")
+                while keyboard.is_pressed("p"):  # Evitar múltiples envíos
+                    time.sleep(0.1)
+
+            elif keyboard.is_pressed("c"):
+                print("\nCuenta atrás reanudada.")
+                main_pipe.send("continue")
+                while keyboard.is_pressed("c"):  # Evitar múltiples envíos
+                    time.sleep(0.1)
+
+            elif keyboard.is_pressed("f"):
+                main_pipe.send("stop")
+                while keyboard.is_pressed("f"):  # Evitar múltiples envíos
+                    time.sleep(0.1)
+                break
+
+            elif keyboard.is_pressed("h"):
+                print_manual()
+                while keyboard.is_pressed("h"):  # Evitar múltiples envíos
+                    time.sleep(0.1)
+
+        except KeyboardInterrupt:
+            print("\nPrograma interrumpido manualmente.")
+            main_pipe.send("stop")
+            break
+
+    timer_process.join()
+
+def print_manual():
+    manual = """
+    Las opciones de teclas son:
+    p   Pausar el temporizador
+    c   Continuar con el temporizador
+    f   Finalizar el temporizador
+    h   Mostrar esta guía de comandos
+    """
+    print(manual)
+
+if __name__ == "__main__":
+    main()
