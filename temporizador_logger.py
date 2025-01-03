@@ -33,7 +33,6 @@ def log(now, tag):
 def pomo_log_line_entry(now, tag):
     date = now.strftime("%y-%m-%d")
     time_str = now.strftime("%H:%M")
-    text = "🍅 {} , {}".format( date, time_str)
     text = "🍅 {} , {}".format(date, time_str)
     if tag:
         text = text + " , #{}".format(tag)
