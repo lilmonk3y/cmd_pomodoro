@@ -60,7 +60,7 @@ def timer(timer_pipe, sys_argv):
 
 def print_pending_time(seconds):
     time_str = "{:02d}:{:02d}:{:02d}".format(seconds//3600, (seconds//60) % 60, seconds % 60)
-    print("Faltan para terminar: {}".format(time_str) , end="\r") # flush=True
+    print("Faltan para terminar: {}".format(time_str) , end="\r", flush=True)
 
 def timer_audio():
     exit_code = os.system("open "+PATH_PC)
