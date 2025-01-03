@@ -15,9 +15,8 @@ import os
 import sys
 from playsound import playsound
 
-def print_pending_time(end):
-    td = end - datetime.now()
-    time_str = "{:02d}:{:02d}:{:02d}".format(td.seconds//3600, (td.seconds//60) % 60, td.seconds % 60)
+def print_pending_time(seconds):
+    time_str = "{:02d}:{:02d}:{:02d}".format(seconds//3600, (seconds//60) % 60, seconds % 60)
     print("Faltan para terminar: {}".format(time_str) , end="\r")
 
 def timer_audio():
@@ -25,13 +24,22 @@ def timer_audio():
     if exit_code:
         os.system("google-chrome "+PATH_VIDEO)
 
-def log_if_apply(now, tss, tags):
-    if tss and (tss[0] < now):
-        ts = tss.pop(0)
-        text = pomo_log_line_entry(ts, now, tags)
-        with open(path_of_log_file(), "a") as log:
-            log.write("\n" + text )
-        play_sound()
+def log(now, tags):
+    text = pomo_log_line_entry(now, tags)
+    with open(path_of_log_file(), "a") as log:
+        log.write("\n" + text )
+    play_sound()
+
+def pomo_log_line_entry(now, tags):
+    date = now.strftime("%y-%m-%d")
+    time_str = now.strftime("%H:%M")
+    text = "🍅 {} , {}".format( date, time_str)
+    if tags:
+        text = text + " , #{}".format(tags[0])
+    return text 
+
+def path_of_log_file():
+    return path_to_file(PATH_TO_LOG)
 
 def play_sound():
     path = path_to_file(BETWEEN_POMODOROS_SOUND)
@@ -40,19 +48,12 @@ def play_sound():
 def path_to_file(path):
     return os.path.join(os.path.expanduser('~'), path)
 
-def path_of_log_file():
-    return path_to_file(PATH_TO_LOG)
-
-def pomo_log_line_entry(ts, today, tags):
-    date = today.strftime("%y-%m-%d")
-    time_str = ts.strftime("%H:%M")
-    text = "🍅 {} , {}".format( date, time_str)
-    if tags:
-        text = text + " , #{}".format(tags[0])
-    return text 
-
 def list_of_timestamps(minutes_of_timer):
-    return [datetime.now() + timedelta(minutes=POMODORO_TIME*i) for i in range(1, minutes_of_timer//POMODORO_TIME + 1)]
+    return [i * POMODORO_TIME for i in range(1, minutes_of_timer//POMODORO_TIME + 1)]
+
+def must_log(seconds_since_last_pomodoro, pomodoro_duration_in_minutes):
+    pomodoro_in_seconds = 60 * pomodoro_duration_in_minutes
+    return seconds_since_last_pomodoro == pomodoro_in_seconds
 
 ##### main #####
 
@@ -64,19 +65,22 @@ tags = []
 if len(sys.argv) > 2:
     tags.append(sys.argv[2])
 
-begin_time = datetime.now()
-end_time = begin_time + timedelta(minutes=minutes_count ,seconds=1)
+seconds = minutes_count * 60
 log_timestamps = list_of_timestamps(minutes_count)
 
 try:
-    while datetime.now() < end_time:
-        print_pending_time(end_time)
-        log_if_apply(datetime.now(), log_timestamps, tags)
+    since_last_pomodoro = 0
+    while 0 <= seconds:
+        print_pending_time(seconds)
+        if must_log(since_last_pomodoro, POMODORO_TIME):
+            now = datetime.now()
+            log(now, tags)
         time.sleep(1)
+        seconds -= 1
+        since_last_pomodoro += 1
 
     timer_audio()
     print("\nFelicitaciones por el período de estudio! Te mereces un descanso.")
 
 except KeyboardInterrupt:
     print("\nRelog apagado")
-
