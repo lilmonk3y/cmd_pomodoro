@@ -51,9 +51,12 @@ def timer(timer_pipe, sys_argv):
             continue
 
         print_pending_time(seconds)
-        if must_log(since_last_pomodoro, POMODORO_TIME):
+        if pomodoro_ended(since_last_pomodoro, POMODORO_TIME):
             now = datetime.now()
             log(now, tag)
+            play_between_pomodoros_sound()
+            since_last_pomodoro = 0
+
         time.sleep(1)
         seconds -= 1
         since_last_pomodoro += 1
@@ -62,16 +65,10 @@ def print_pending_time(seconds):
     time_str = "{:02d}:{:02d}:{:02d}".format(seconds//3600, (seconds//60) % 60, seconds % 60)
     print("Faltan para terminar: {}".format(time_str) , end="\r", flush=True)
 
-def timer_audio():
-    exit_code = os.system("open "+PATH_PC)
-    if exit_code:
-        os.system("google-chrome "+PATH_VIDEO)
-
 def log(now, tag):
     text = pomo_log_line_entry(now, tag)
     with open(path_of_log_file(), "a") as log:
         log.write("\n" + text )
-    play_sound()
 
 def pomo_log_line_entry(now, tag):
     date = now.strftime("%y-%m-%d")
@@ -84,14 +81,14 @@ def pomo_log_line_entry(now, tag):
 def path_of_log_file():
     return path_to_file(PATH_TO_LOG)
 
-def play_sound():
+def play_between_pomodoros_sound():
     path = path_to_file(BETWEEN_POMODOROS_SOUND)
     playsound(path)
 
 def path_to_file(path):
     return os.path.join(os.path.expanduser('~'), path)
 
-def must_log(seconds_since_last_pomodoro, pomodoro_duration_in_minutes):
+def pomodoro_ended(seconds_since_last_pomodoro, pomodoro_duration_in_minutes):
     pomodoro_in_seconds = 60 * pomodoro_duration_in_minutes
     return seconds_since_last_pomodoro == pomodoro_in_seconds
 
@@ -108,7 +105,7 @@ def main():
             msg = main_pipe.recv()
 
             if msg == "finished":
-                timer_audio()
+                play_end_of_timer_audio()
                 print("\nFelicitaciones por el período de estudio! Te mereces un descanso.")
 
             elif msg == "stoped":
@@ -147,6 +144,11 @@ def main():
             break
 
     timer_process.join()
+
+def play_end_of_timer_audio():
+    exit_code = os.system("open "+PATH_PC)
+    if exit_code:
+        os.system("google-chrome "+PATH_VIDEO)
 
 def print_manual():
     manual = """
