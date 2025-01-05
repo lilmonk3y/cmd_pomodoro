@@ -15,12 +15,15 @@ import os
 import sys
 from playsound import playsound
 import multiprocessing
-import keyboard
+import select
+import signal
 
 ##### timer #####
 
 def timer(timer_pipe, sys_argv):
     """Timer process manages the pomodoros and the logging of them"""
+
+    signal.signal(signal.SIGINT, timer_interrupted)
 
     minutes_count = TIME_PERIOD
     if len(sys_argv) > 1:
@@ -43,7 +46,8 @@ def timer(timer_pipe, sys_argv):
             elif msg == "continue":
                 paused = False
             elif msg == "stop":
-                break
+                timer_pipe.send("stoped")
+                return
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by timer")
 
@@ -60,6 +64,11 @@ def timer(timer_pipe, sys_argv):
         time.sleep(1)
         seconds -= 1
         since_last_pomodoro += 1
+
+    timer_pipe.send("finished")
+
+def timer_interrupted(signum, frame):
+    print("\nRelog apagado")
 
 def print_pending_time(seconds):
     time_str = "{:02d}:{:02d}:{:02d}".format(seconds//3600, (seconds//60) % 60, seconds % 60)
@@ -107,43 +116,45 @@ def main():
             if msg == "finished":
                 play_end_of_timer_audio()
                 print("\nFelicitaciones por el período de estudio! Te mereces un descanso.")
+                break
 
             elif msg == "stoped":
                 print("\nRelog apagado")
+                break
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
 
         try:
-            if keyboard.is_pressed("p"): 
-                print("\nCuenta atrás pausada.")
-                main_pipe.send("pause")
-                while keyboard.is_pressed("p"):  # Evitar múltiples envíos
-                    time.sleep(0.1)
+            key = get_key()
+            match key:
+                case "p":
+                    print("\nCuenta atrás pausada.")
+                    main_pipe.send("pause")
 
-            elif keyboard.is_pressed("c"):
-                print("\nCuenta atrás reanudada.")
-                main_pipe.send("continue")
-                while keyboard.is_pressed("c"):  # Evitar múltiples envíos
-                    time.sleep(0.1)
+                case "c":
+                    print("\nCuenta atrás reanudada.")
+                    main_pipe.send("continue")
 
-            elif keyboard.is_pressed("f"):
-                main_pipe.send("stop")
-                while keyboard.is_pressed("f"):  # Evitar múltiples envíos
-                    time.sleep(0.1)
-                break
+                case "f":
+                    main_pipe.send("stop")
 
-            elif keyboard.is_pressed("h"):
-                print_manual()
-                while keyboard.is_pressed("h"):  # Evitar múltiples envíos
-                    time.sleep(0.1)
+                case "h":
+                    print_manual()
 
         except KeyboardInterrupt:
-            print("\nPrograma interrumpido manualmente.")
             main_pipe.send("stop")
             break
 
     timer_process.join()
+
+def get_key():
+    """Lee una tecla de manera no bloqueante."""
+    if select.select([sys.stdin], [], [], 0.1)[0]:
+        key = sys.stdin.read(1)
+        return key
+
+    return None
 
 def play_end_of_timer_audio():
     exit_code = os.system("open "+PATH_PC)
