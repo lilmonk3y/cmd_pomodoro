@@ -17,6 +17,7 @@ from playsound import playsound
 import multiprocessing
 import select
 import signal
+import math
 
 ##### timer #####
 
@@ -101,9 +102,37 @@ def pomodoro_ended(seconds_since_last_pomodoro, pomodoro_duration_in_minutes):
     pomodoro_in_seconds = 60 * pomodoro_duration_in_minutes
     return seconds_since_last_pomodoro == pomodoro_in_seconds
 
+##### stopwatch #####
+
+def stopwatch_process():
+    signal_handler = StopwatchSignalHandler()
+    
+    print("\nTemporizador iniciado")
+
+    while signal_handler.KEEP_PROCESSING:
+        time.sleep(1)
+        signal_handler.SECONDS_COUNT += 1
+
+    print("\nLa duración del temporizador fue de: {}".format(stopwach_msg(signal_handler.SECONDS_COUNT)))
+
+def stopwach_msg(seconds):
+    minutes = math.ceil(seconds/60)
+    return f"{minutes} minutos" if minutes != 1 else f"{minutes} minuto"
+    
+class StopwatchSignalHandler:
+    KEEP_PROCESSING = True
+    SECONDS_COUNT = 0
+    def __init__(self):
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+    def exit_gracefully(self, signum, frame):
+        self.KEEP_PROCESSING = False
+
 ##### main - keyboard manager #####
 
 def main():
+    stopwatch = None
+
     main_pipe, timer_pipe = multiprocessing.Pipe()
 
     timer_process = multiprocessing.Process(target=timer, args=(timer_pipe, sys.argv))
@@ -138,6 +167,14 @@ def main():
 
                 case "f":
                     main_pipe.send("stop")
+                
+                case "t":
+                    if stopwatch:
+                        stopwatch.terminate()
+                        stopwatch = None
+                    else:
+                        stopwatch = multiprocessing.Process(target=stopwatch_process)
+                        stopwatch.start()
 
                 case "h":
                     print_manual()
@@ -145,6 +182,9 @@ def main():
         except KeyboardInterrupt:
             main_pipe.send("stop")
             break
+
+    if stopwatch:
+        stopwatch.terminate()
 
     timer_process.join()
 
@@ -167,6 +207,7 @@ def print_manual():
     p   Pausar el temporizador
     c   Continuar con el temporizador
     f   Finalizar el temporizador
+    t   Iniciar un stopwatch
     h   Mostrar esta guía de comandos
     """
     print(manual)
