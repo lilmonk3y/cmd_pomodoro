@@ -171,6 +171,7 @@ def main():
                 case "t":
                     if stopwatch:
                         stopwatch.terminate()
+                        stopwatch.join()
                         stopwatch = None
                     else:
                         stopwatch = multiprocessing.Process(target=stopwatch_process)
