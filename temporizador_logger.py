@@ -3,9 +3,8 @@
 # active venv:  source temporizador_logguer/bin/activate ; deactivate
 
 TIME_PERIOD = 61
-PATH_PC = "~/Scripts/temporizador_logger/audio/JAAA.mp3"
-PATH_VIDEO = "https://www.youtube.com/watch?v=SPXhPIfECIE"
 POMODORO_TIME = 30
+PATH_PC = "Scripts/temporizador_logger/audio/JAAA.mp3"
 BETWEEN_POMODOROS_SOUND = "Scripts/temporizador_logger/audio/notification_sound_1.mp3"
 PATH_TO_LOG = "Dropbox/obsidian_sync/obsidian_dropbox/logging/pomodoro_log.md"
 
@@ -13,11 +12,12 @@ import time
 from datetime import datetime, timedelta
 import os
 import sys
-from playsound import playsound
 import multiprocessing
 import select
 import signal
 import math
+import pydub
+import simpleaudio
 
 ##### timer #####
 
@@ -126,12 +126,31 @@ class StopwatchSignalHandler:
 
 ##### audio - play audio on background #####
 
-def audio_process(audio_path):
-    play_on_background(audio_path)
+def audio_process(audio_path, audio_pipe):
+    mp3_path = path_to_file(audio_path)
+    audio = pydub.AudioSegment.from_mp3(mp3_path)
+    NEW_AUDIO_PATH = "timer_audio.wav"
 
-def play_on_background(audio_track_path):
-    path = path_to_file(BETWEEN_POMODOROS_SOUND)
-    playsound(path)
+    try:
+        audio.export(NEW_AUDIO_PATH, format="wav")
+        wave_object = simpleaudio.WaveObject.from_wave_file(NEW_AUDIO_PATH)
+        play_object = wave_object.play()
+        while play_object.is_playing():
+            if audio_pipe.poll():
+                msg = audio_pipe.recv()
+
+                if msg == "audio_terminate":
+                    play_object.stop()
+                    break
+                else:
+                    time.sleep(0.5)
+
+        audio_pipe.send("audio_ended")
+        audio_pipe.close()
+
+    finally:
+        if os.path.exists(NEW_AUDIO_PATH):
+            os.remove(NEW_AUDIO_PATH)
 
 ##### main - keyboard manager #####
 
@@ -139,25 +158,35 @@ def main():
     stopwatch = None
 
     main_pipe, timer_pipe = multiprocessing.Pipe()
-
     timer_process = multiprocessing.Process(target=timer, args=(timer_pipe, sys.argv))
     timer_process.start()
+
+    audio_pipe_father, audio_pipe_child = multiprocessing.Pipe()
+    audio_process = None
 
     while True:
         if main_pipe.poll():
             msg = main_pipe.recv()
 
             if msg == "finished":
-                play_end_of_timer_audio()
-                print("\nFelicitaciones por el período de estudio! Te mereces un descanso.")
-                break
+                audio_process = play_audio_on_subprocess(PATH_PC, audio_pipe_child)
 
             elif msg == "stoped":
                 print("\nRelog apagado")
                 break
 
             elif msg == "audio_pomodoro_finished":
-                play_audio_on_subprocess(BETWEEN_POMODOROS_SOUND)
+                play_audio_on_subprocess(BETWEEN_POMODOROS_SOUND, audio_pipe_child)
+
+            else:
+                raise RuntimeError(f"Message {msg} is unhandled by main process")
+
+        if audio_process and audio_pipe_father.poll():
+            msg = audio_pipe_father.recv()
+
+            if msg == "audio_ended":
+                print("\nFelicitaciones por el período de estudio! Te mereces un descanso.")
+                break
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
@@ -184,6 +213,11 @@ def main():
                     else:
                         stopwatch = multiprocessing.Process(target=stopwatch_process)
                         stopwatch.start()
+                
+                case "s":
+                    if audio_process:
+                        audio_pipe_father.send("audio_terminate")
+                        audio_process.join()
 
                 case "h":
                     print_manual()
@@ -205,13 +239,10 @@ def get_key():
 
     return None
 
-def play_end_of_timer_audio():
-    exit_code = os.system("open "+PATH_PC)
-    if exit_code:
-        os.system("google-chrome "+PATH_VIDEO)
-
-def play_audio_on_subprocess(audio_track_path):
-    (multiprocessing.Process(target=audio_process, args=(audio_track_path,))).start()
+def play_audio_on_subprocess(audio_track_path, audio_pipe):
+    process = multiprocessing.Process(target=audio_process, args=(audio_track_path, audio_pipe))
+    process.start()
+    return process
 
 def print_manual():
     manual = """
@@ -220,6 +251,7 @@ def print_manual():
     c   Continuar con el temporizador
     f   Finalizar el temporizador
     t   Iniciar un stopwatch
+    s   Detener la reproducción del sonido de finalización del timer
     h   Mostrar esta guía de comandos
     """
     print(manual)
