@@ -59,7 +59,7 @@ def timer(timer_pipe, sys_argv):
         if pomodoro_ended(since_last_pomodoro, POMODORO_TIME):
             now = datetime.now()
             log(now, tag)
-            play_between_pomodoros_sound()
+            timer_pipe.send("audio_pomodoro_finished")
             since_last_pomodoro = 0
 
         time.sleep(1)
@@ -90,10 +90,6 @@ def pomo_log_line_entry(now, tag):
 
 def path_of_log_file():
     return path_to_file(PATH_TO_LOG)
-
-def play_between_pomodoros_sound():
-    path = path_to_file(BETWEEN_POMODOROS_SOUND)
-    playsound(path)
 
 def path_to_file(path):
     return os.path.join(os.path.expanduser('~'), path)
@@ -128,6 +124,15 @@ class StopwatchSignalHandler:
     def exit_gracefully(self, signum, frame):
         self.KEEP_PROCESSING = False
 
+##### audio - play audio on background #####
+
+def audio_process(audio_path):
+    play_on_background(audio_path)
+
+def play_on_background(audio_track_path):
+    path = path_to_file(BETWEEN_POMODOROS_SOUND)
+    playsound(path)
+
 ##### main - keyboard manager #####
 
 def main():
@@ -150,6 +155,9 @@ def main():
             elif msg == "stoped":
                 print("\nRelog apagado")
                 break
+
+            elif msg == "audio_pomodoro_finished":
+                play_audio_on_subprocess(BETWEEN_POMODOROS_SOUND)
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
@@ -201,6 +209,9 @@ def play_end_of_timer_audio():
     exit_code = os.system("open "+PATH_PC)
     if exit_code:
         os.system("google-chrome "+PATH_VIDEO)
+
+def play_audio_on_subprocess(audio_track_path):
+    (multiprocessing.Process(target=audio_process, args=(audio_track_path,))).start()
 
 def print_manual():
     manual = """
