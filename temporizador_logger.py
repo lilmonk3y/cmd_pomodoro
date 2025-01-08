@@ -2,12 +2,6 @@
 
 # active venv:  source temporizador_logguer/bin/activate ; deactivate
 
-TIME_PERIOD = 61
-POMODORO_TIME = 30
-PATH_PC = "Scripts/temporizador_logger/audio/JAAA.mp3"
-BETWEEN_POMODOROS_SOUND = "Scripts/temporizador_logger/audio/notification_sound_1.mp3"
-PATH_TO_LOG = "Dropbox/obsidian_sync/obsidian_dropbox/logging/pomodoro_log.md"
-
 import time
 from datetime import datetime, timedelta
 import os
@@ -18,21 +12,16 @@ import signal
 import math
 import pydub
 import simpleaudio
+from configparser import ConfigParser
+import dataclasses as dc
+
 
 ##### timer #####
 
-def timer(timer_pipe, sys_argv):
+def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time):
     """Timer process manages the pomodoros and the logging of them"""
 
     signal.signal(signal.SIGINT, timer_interrupted)
-
-    minutes_count = TIME_PERIOD
-    if len(sys_argv) > 1:
-        minutes_count = int(sys_argv[1])
-
-    tag = None
-    if len(sys_argv) > 2:
-        tag = sys_argv[2]
 
     seconds = minutes_count * 60
     since_last_pomodoro = 0
@@ -56,9 +45,9 @@ def timer(timer_pipe, sys_argv):
             continue
 
         print_pending_time(seconds)
-        if pomodoro_ended(since_last_pomodoro, POMODORO_TIME):
+        if pomodoro_ended(since_last_pomodoro, pomodoro_time):
             now = datetime.now()
-            log(now, tag)
+            log(now, tag, log_file)
             timer_pipe.send("audio_pomodoro_finished")
             since_last_pomodoro = 0
 
@@ -75,9 +64,9 @@ def print_pending_time(seconds):
     time_str = "{:02d}:{:02d}:{:02d}".format(seconds//3600, (seconds//60) % 60, seconds % 60)
     print("Faltan para terminar: {}".format(time_str) , end="\r", flush=True)
 
-def log(now, tag):
+def log(now, tag, log_file):
     text = pomo_log_line_entry(now, tag)
-    with open(path_of_log_file(), "a") as log:
+    with open(path_to_file(log_file), "a") as log:
         log.write("\n" + text )
 
 def pomo_log_line_entry(now, tag):
@@ -87,9 +76,6 @@ def pomo_log_line_entry(now, tag):
     if tag:
         text = text + " , #{}".format(tag)
     return text 
-
-def path_of_log_file():
-    return path_to_file(PATH_TO_LOG)
 
 def path_to_file(path):
     return os.path.join(os.path.expanduser('~'), path)
@@ -155,10 +141,13 @@ def audio_process(audio_path, audio_pipe):
 ##### main - keyboard manager #####
 
 def main():
+    config = load_config_from_file()
+    args = read_input(sys.argv, config)
+
     stopwatch = None
 
     main_pipe, timer_pipe = multiprocessing.Pipe()
-    timer_process = multiprocessing.Process(target=timer, args=(timer_pipe, sys.argv))
+    timer_process = multiprocessing.Process(target=timer, args=(timer_pipe, args.minutes_count, args.tag, config.path_to_log, config.pomodoro_time))
     timer_process.start()
 
     audio_pipe_father, audio_pipe_child = multiprocessing.Pipe()
@@ -169,14 +158,14 @@ def main():
             msg = main_pipe.recv()
 
             if msg == "finished":
-                audio_process = play_audio_on_subprocess(PATH_PC, audio_pipe_child)
+                audio_process = play_audio_on_subprocess(config.path_pc, audio_pipe_child)
 
             elif msg == "stoped":
                 print("\nRelog apagado")
                 break
 
             elif msg == "audio_pomodoro_finished":
-                play_audio_on_subprocess(BETWEEN_POMODOROS_SOUND, audio_pipe_child)
+                play_audio_on_subprocess(config.between_pomodoros_sound, audio_pipe_child)
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
@@ -255,6 +244,73 @@ def print_manual():
     h   Mostrar esta guía de comandos
     """
     print(manual)
+
+def load_config_from_file(file="config.ini", env="PRODUCTION"):
+    if not os.path.exists(file):
+        raise RuntimeError("The config file {} doesn't exists".format(file))
+    
+    config = ConfigParser()
+    config.read(file)
+    if not config[env]:
+        raise RuntimeError("The config file {} doesn't have the expected environment {}.".format(file, env))
+
+    return build_config_file(config[env])
+
+def build_config_file(config_map):
+    fields = dc.fields(Config)
+    field_keys = list(map(lambda f: f.name, fields))
+    keys = list(config_map.keys())
+    if not set(keys).issubset(field_keys):
+        raise RuntimeError("There are missing keys in the config file. Expected keys: {}. Actual keys: {}".format(field_keys, keys))
+
+    return Config(
+            time_period= int(config_map["time_period"]),
+            pomodoro_time= int(config_map["pomodoro_time"]),
+            path_pc= config_map["path_pc"],
+            between_pomodoros_sound= config_map["between_pomodoros_sound"],
+            path_to_log= config_map["path_to_log"]
+            )
+
+@dc.dataclass(frozen=True)
+class Config:
+    time_period : int
+    pomodoro_time : int
+    path_pc : str
+    between_pomodoros_sound : str
+    path_to_log : str
+
+def read_input(argv, config):
+    minutes_count = config.time_period
+    if len(argv) > 1:
+        minutes_count = int(argv[1])
+
+    tag = None
+    if len(argv) > 2:
+        tag = argv[2]
+
+    return Input(
+            minutes_count=minutes_count,
+            tag=tag)
+
+@dc.dataclass(frozen=True)
+class Input:
+    minutes_count : int
+    tag : str
+
+def write_config(file="config.ini", env="TEST"):
+    config_object = ConfigParser()
+
+    # Add server configuration to the config object
+    config_object[env] = {
+    "TIME_PERIOD": 2,
+    "POMODORO_TIME": 1,
+    "PATH_PC": "Scripts/temporizador_logger/audio/JAAA.mp3",
+    "BETWEEN_POMODOROS_SOUND": "Scripts/temporizador_logger/audio/notification_sound_1.mp3",
+    "PATH_TO_LOG": "Scripts/temporizador_logger/test/pomodoro_log.md"
+    }
+
+    with open('config.ini', 'a') as conf: 
+        config_object.write(conf)
 
 if __name__ == "__main__":
     main()
