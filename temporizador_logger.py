@@ -217,6 +217,7 @@ def main():
 
     if stopwatch:
         stopwatch.terminate()
+        stopwatch.join()
 
     timer_process.join()
 
