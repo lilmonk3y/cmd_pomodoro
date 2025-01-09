@@ -14,6 +14,7 @@ import pydub
 import simpleaudio
 from configparser import ConfigParser
 import dataclasses as dc
+import argparse
 
 
 ##### timer #####
@@ -141,8 +142,8 @@ def audio_process(audio_path, audio_pipe):
 ##### main - keyboard manager #####
 
 def main():
-    config = load_config_from_file()
-    args = read_input(sys.argv, config)
+    args = read_input()
+    config = load_config_from_file(args=args)
 
     stopwatch = None
 
@@ -246,10 +247,45 @@ def print_manual():
     """
     print(manual)
 
-def load_config_from_file(file="config.ini", env="PRODUCTION"):
+def read_input():
+    parser = build_parser()
+
+    return parser.parse_args()
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+            description="""Es un programa que permite crear temporizadores que siguen 
+            metodología pomodoro. Además lleva un registro de los pomodoros hechos
+            e informa por medio de sonidos el estado del temporizador"""
+            )
+    
+    parser.add_argument(
+            "minutes_count",
+            type=int,
+            help="""Cantidad de minutos que debe durar el temporizador. Este es el 
+            primer argumento posicional""",
+            )
+
+    parser.add_argument(
+            "-tag", "-t",
+            type=str,
+            help="Tarea en la que se dedicó el tiempo del pomodoro."
+            )
+
+    parser.add_argument(
+            "--test",
+            action="store_true",
+            help="Define la configuración a ser levantada como la de test",
+            default=False
+            )
+    
+    return parser
+
+def load_config_from_file(args, file="config.ini"):
     if not os.path.exists(file):
         raise RuntimeError("The config file {} doesn't exists".format(file))
     
+    env = "TEST" if args.test else "PRODUCTION"
     config = ConfigParser()
     config.read(file)
     if not config[env]:
@@ -265,7 +301,6 @@ def build_config_file(config_map):
         raise RuntimeError("There are missing keys in the config file. Expected keys: {}. Actual keys: {}".format(field_keys, keys))
 
     return Config(
-            time_period= int(config_map["time_period"]),
             pomodoro_time= int(config_map["pomodoro_time"]),
             path_pc= config_map["path_pc"],
             between_pomodoros_sound= config_map["between_pomodoros_sound"],
@@ -274,36 +309,16 @@ def build_config_file(config_map):
 
 @dc.dataclass(frozen=True)
 class Config:
-    time_period : int
     pomodoro_time : int
     path_pc : str
     between_pomodoros_sound : str
     path_to_log : str
-
-def read_input(argv, config):
-    minutes_count = config.time_period
-    if len(argv) > 1:
-        minutes_count = int(argv[1])
-
-    tag = None
-    if len(argv) > 2:
-        tag = argv[2]
-
-    return Input(
-            minutes_count=minutes_count,
-            tag=tag)
-
-@dc.dataclass(frozen=True)
-class Input:
-    minutes_count : int
-    tag : str
 
 def write_config(file="config.ini", env="TEST"):
     config_object = ConfigParser()
 
     # Add server configuration to the config object
     config_object[env] = {
-    "TIME_PERIOD": 2,
     "POMODORO_TIME": 1,
     "PATH_PC": "Scripts/temporizador_logger/audio/JAAA.mp3",
     "BETWEEN_POMODOROS_SOUND": "Scripts/temporizador_logger/audio/notification_sound_1.mp3",
