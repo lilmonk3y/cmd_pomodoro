@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import os
 import sys
 import multiprocessing
+import subprocess
 import select
 import signal
 import math
@@ -15,7 +16,6 @@ import simpleaudio
 from configparser import ConfigParser
 import dataclasses as dc
 import argparse
-
 
 ##### timer #####
 
@@ -159,6 +159,7 @@ def main():
             msg = main_pipe.recv()
 
             if msg == "finished":
+                publish_notification(finished_info_msg(args))
                 audio_process = play_audio_on_subprocess(config.path_pc, audio_pipe_child)
 
             elif msg == "stoped":
@@ -229,6 +230,21 @@ def get_key():
         return key
 
     return None
+
+def publish_notification(msgs):
+    subprocess.run(["notify-send", *msgs, "-a", "cmd_pomodoro", "-t", "10"])
+
+def finished_info_msg(args):
+    summary_msg = "Finalizó el temporizador de {} minutos".format(args.minutes_count)
+    if args.tag:
+        summary_msg += " para la tarea {}.".format(args.tag)
+    else:
+        summary_msg += "."
+
+    return [
+            summary_msg,
+            "Felicitaciones por el período de estudio! Te mereces un descanso."
+            ]
 
 def play_audio_on_subprocess(audio_track_path, audio_pipe):
     process = multiprocessing.Process(target=audio_process, args=(audio_track_path, audio_pipe))
