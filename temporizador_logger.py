@@ -16,6 +16,7 @@ import simpleaudio
 from configparser import ConfigParser
 import dataclasses as dc
 import argparse
+import wave
 
 ##### timer #####
 
@@ -49,7 +50,8 @@ def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time):
         if pomodoro_ended(since_last_pomodoro, pomodoro_time):
             now = datetime.now()
             log(now, tag, log_file)
-            timer_pipe.send("audio_pomodoro_finished")
+            if 0 < seconds:
+                timer_pipe.send("audio_pomodoro_finished")
             since_last_pomodoro = 0
 
         time.sleep(1)
@@ -122,18 +124,48 @@ def audio_process(audio_path, audio_pipe):
         audio.export(NEW_AUDIO_PATH, format="wav")
         wave_object = simpleaudio.WaveObject.from_wave_file(NEW_AUDIO_PATH)
         play_object = wave_object.play()
-        while play_object.is_playing():
+
+        continue_play = when_to_stop(NEW_AUDIO_PATH)
+        # and play_object.is_playing()
+        while continue_play() :
             if audio_pipe.poll():
                 msg = audio_pipe.recv()
 
                 if msg == "audio_terminate":
                     play_object.stop()
                     break
-                else:
-                    time.sleep(0.5)
+
+            else:
+                time.sleep(0.5)
 
         audio_pipe.send("audio_ended")
         audio_pipe.close()
+
+    finally:
+        if os.path.exists(NEW_AUDIO_PATH):
+            os.remove(NEW_AUDIO_PATH)
+
+def when_to_stop(wav_file):
+    length = length_in_seconds(wav_file)
+    end_of_song = datetime.now() + timedelta(seconds=(length-1))
+    return lambda: datetime.now() < end_of_song
+
+def length_in_seconds(file):
+    length = None
+    with wave.open(file, 'rb') as wav:
+        length = wav.getnframes() / float(wav.getframerate())
+    return int(length)
+
+def audio_process_short(audio_path):
+    mp3_path = path_to_file(audio_path)
+    audio = pydub.AudioSegment.from_mp3(mp3_path)
+    NEW_AUDIO_PATH = "pomo_audio.wav"
+
+    try:
+        audio.export(NEW_AUDIO_PATH, format="wav")
+        wave_object = simpleaudio.WaveObject.from_wave_file(NEW_AUDIO_PATH)
+        play_object = wave_object.play()
+        time.sleep(length_in_seconds(NEW_AUDIO_PATH))
 
     finally:
         if os.path.exists(NEW_AUDIO_PATH):
@@ -167,7 +199,7 @@ def main():
                 break
 
             elif msg == "audio_pomodoro_finished":
-                play_audio_on_subprocess(config.between_pomodoros_sound, audio_pipe_child)
+                 (multiprocessing.Process(target=audio_process_short, args=(config.between_pomodoros_sound,))).start()
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
@@ -222,6 +254,7 @@ def main():
         stopwatch.join()
 
     timer_process.join()
+    audio_process.join()
 
 def get_key():
     """Lee una tecla de manera no bloqueante."""
