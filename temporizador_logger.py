@@ -11,12 +11,10 @@ import subprocess
 import select
 import signal
 import math
-import pydub
-import simpleaudio
+import pydub, simpleaudio, wave
 from configparser import ConfigParser
 import dataclasses as dc
 import argparse
-import wave
 import curses
 from enum import StrEnum, auto
 
@@ -226,7 +224,7 @@ def printer_msg(msg, last_msg):
         case _:
             raise RuntimeError("msg {} unhandled".format(msg))
 
-    return "Time: {time:8} - cmd msgs: {cmd:20} - app msgs: {app:20}".format(**line), line
+    return "Time: {time:8} - cmd msgs: {cmd:30} - app msgs: {app:40}".format(**line), line
 
 #def printer(msg_queue):
 #    curses.wrapper(printer_display, msg_queue)
@@ -256,7 +254,7 @@ def printer_display(stdscr, msg_queue):
 
         time.sleep(0.1)
 
-@dc.dataclass
+@dc.dataclass(frozen=True)
 class Msg:
     kind : str# kind : MsgType
     msg : str
