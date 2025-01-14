@@ -49,6 +49,7 @@ def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time, msg_queue):
         if pomodoro_ended(since_last_pomodoro, pomodoro_time):
             now = datetime.now()
             log(now, tag, log_file)
+            print_app_msg(msg_queue,pomo_log_line_entry(now,tag))
             if 0 < seconds:
                 timer_pipe.send("audio_pomodoro_finished")
             since_last_pomodoro = 0
@@ -87,13 +88,13 @@ def pomodoro_ended(seconds_since_last_pomodoro, pomodoro_duration_in_minutes):
 def stopwatch_process(msg_queue):
     signal_handler = StopwatchSignalHandler()
     
-    print_cmd_msg(msg_queue,"Temporizador iniciado")
+    print_app_msg(msg_queue,"Temporizador iniciado")
 
     while signal_handler.KEEP_PROCESSING:
         time.sleep(1)
         signal_handler.SECONDS_COUNT += 1
 
-    print_cmd_msg(msg_queue,"Temporizador duro: {}".format(stopwach_msg(signal_handler.SECONDS_COUNT)))
+    print_app_msg(msg_queue,"Temporizador duro: {}".format(stopwach_msg(signal_handler.SECONDS_COUNT)))
 
 def stopwach_msg(seconds):
     minutes = math.ceil(seconds/60)
@@ -171,11 +172,11 @@ def audio_process_short(audio_path):
 def print_time(msg_queue, time):
     _print(msg_queue, Msg(MsgType.Time, time))
 
-def print_cmd_msg(msg_queue, msg):
-    _print(msg_queue, Msg(MsgType.Cmd, msg))
-
 def print_app_msg(msg_queue, msg):
     _print(msg_queue, Msg(MsgType.App, msg))
+
+def print_cmd_msg(msg_queue, msg):
+    _print(msg_queue, Msg(MsgType.Cmd, msg))
 
 def print_terminate(msg_queue):
     _print(msg_queue, Msg(MsgType.Termination, ""))
@@ -183,40 +184,17 @@ def print_terminate(msg_queue):
 def _print(msg_queue, msg): # msg : Msg
     msg_queue.put(msg)
 
-def printer(msg_queue):
-    last_msg = {"time":"","cmd":"","app":""}
-    lines = []
-
-    while True:
-        while not msg_queue.empty():
-            msg = msg_queue.get()
-
-            if msg.kind == MsgType.Termination:
-                print("Bye", end="\r", flush=True)
-                return
-            
-            lines.append(msg)
-
-        line = Msg(MsgType.Empty,"") if not lines else lines.pop()
-
-        str_msg, last_msg = printer_msg(line,last_msg)
-        print(str_msg,
-              end="\r",
-              flush=True)
-              
-        time.sleep(0.1)
-
-def printer_msg(msg, last_msg):
-    line = last_msg
+def curr_state(msg, last_state):
+    state = last_state
     match msg.kind:
         case MsgType.Time:
-            line["time"] = msg.msg
-
-        case MsgType.Cmd:
-            line["cmd"] = msg.msg
+            state["time"] = msg.msg
 
         case MsgType.App:
-            line["app"] = msg.msg
+            state["app"].append(msg.msg)
+
+        case MsgType.Cmd:
+            state["cmd"] = msg.msg
 
         case MsgType.Empty:
             pass
@@ -224,35 +202,90 @@ def printer_msg(msg, last_msg):
         case _:
             raise RuntimeError("msg {} unhandled".format(msg))
 
-    return "Time: {time:8} - cmd msgs: {cmd:30} - app msgs: {app:40}".format(**line), line
+    return state
 
-#def printer(msg_queue):
-#    curses.wrapper(printer_display, msg_queue)
+def printer(msg_queue):
+    curses.wrapper(printer_display, msg_queue)
 
 def printer_display(stdscr, msg_queue):
-    curses.curs_set(0)
+    # Configurar curses
+    curses.curs_set(0)  # Ocultar el cursor
     stdscr.clear()
-    stdscr.refresh()
 
+    # Obtener tamaño de la pantalla
+    height, width = stdscr.getmaxyx()
+
+    # Calcular dimensiones de las ventanas
+    timer_height = height 
+    manual_height = height // 3
+    command_input_height = manual_height
+    app_messages_height = height - (2 * manual_height)
+
+    timer_width = width // 2
+    manual_width = width // 2
+    command_input_width = manual_width
+    app_messages_width = width - manual_width
+
+    # Crear ventanas
+    timer_win = curses.newwin(timer_height, timer_width, 0, 0)
+    manual_win = curses.newwin(manual_height, manual_width, 0, timer_width)
+    command_input_win = curses.newwin(command_input_height, command_input_width, manual_height, manual_width)
+    app_messages_win = curses.newwin(app_messages_height, app_messages_width, 2 * manual_height, manual_width)
+
+    # Dibujar bordes y etiquetas iniciales
+    manual_win.box()
+    manual_win.addstr(0, 2, " Manual ")
+
+    timer_win.box()
+    timer_win.addstr(0, 2, " Tiempo para finalizar ")
+
+    command_input_win.box()
+    command_input_win.addstr(0, 2, " Commandos tipeados ")
+
+    app_messages_win.box()
+    app_messages_win.addstr(0, 2, " Mensajes de la aplicación ")
+
+    # Refrescar ventanas
+    timer_win.refresh()
+
+    for index, line in enumerate(app_manual().splitlines()):
+        manual_win.addstr(index+1, 1, line)
+    manual_win.refresh()
+
+    command_input_win.refresh()
+    app_messages_win.refresh()
+
+    last_state = {"time":"","app":[],"cmd":""} # TODO create State class
     lines = []
 
     while True:
         while not msg_queue.empty():
             msg = msg_queue.get()
 
-            if msg.type == MsgType.Termination:
-                curses.endwin()
+            if msg.kind == MsgType.Termination:
                 return
             
             lines.append(msg)
 
-        line = "" if not lines else lines.pop()
+        line = Msg(MsgType.Empty,"") if not lines else lines.pop()
 
-        stdscr.clear()
-        stdscr.addstr(1,0,line)
-        stdscr.refresh()
+        state = curr_state(line,last_state)
 
-        time.sleep(0.1)
+        
+        timer_win.addstr(1, 1,state["time"])
+        timer_win.refresh()
+
+        command_input_win.addstr(1, 1, "Cmd key pressed: {}".format(state["cmd"]))
+        command_input_win.refresh()
+
+        for index, msg in enumerate(list(reversed(state["app"]))[:app_messages_height-2]):
+            app_messages_win.addstr(index+1,1," " * (app_messages_width - 2))  # Limpiar la línea
+            app_messages_win.addstr(index+1,1,msg)
+        app_messages_win.refresh()
+
+
+        time.sleep(0.5)
+        last_state = state
 
 @dc.dataclass(frozen=True)
 class Msg:
@@ -261,8 +294,8 @@ class Msg:
 
 class MsgType(StrEnum):
     Time = auto()
-    Cmd = auto()
     App = auto()
+    Cmd = auto()
     Termination = auto()
     Empty = auto()
 
@@ -308,6 +341,7 @@ def main():
 
             if msg == "audio_ended":
                 print_app_msg(msg_queue, "Felicitaciones por el período de estudio! Te mereces un descanso.")
+                time.sleep(2)
                 break
 
             else:
@@ -317,17 +351,21 @@ def main():
             key = get_key()
             match key:
                 case "p":
-                    print_cmd_msg(msg_queue,"Cuenta atrás pausada.")
+                    print_cmd_msg(msg_queue,"p")
+                    print_app_msg(msg_queue,"Cuenta atrás pausada.")
                     main_pipe.send("pause")
 
                 case "c":
-                    print_cmd_msg(msg_queue,"Cuenta atrás reanudada.")
+                    print_cmd_msg(msg_queue,"c")
+                    print_app_msg(msg_queue,"Cuenta atrás reanudada.")
                     main_pipe.send("continue")
 
                 case "f":
+                    print_cmd_msg(msg_queue,"f")
                     main_pipe.send("stop")
                 
                 case "t":
+                    print_cmd_msg(msg_queue,"t")
                     if stopwatch:
                         stopwatch.terminate()
                         stopwatch.join()
@@ -337,12 +375,13 @@ def main():
                         stopwatch.start()
                 
                 case "s":
+                    print_cmd_msg(msg_queue,"s")
                     if audio_process:
                         audio_pipe_father.send("audio_terminate")
                         audio_process.join()
 
                 case "h":
-                    print_app_msg(msg_queue, app_manual())
+                    print_cmd_msg(msg_queue,"h")
 
         except KeyboardInterrupt:
             main_pipe.send("stop")
