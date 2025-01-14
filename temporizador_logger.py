@@ -17,10 +17,12 @@ from configparser import ConfigParser
 import dataclasses as dc
 import argparse
 import wave
+import curses
+from enum import StrEnum, auto
 
 ##### timer #####
 
-def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time):
+def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time, msg_queue):
     """Timer process manages the pomodoros and the logging of them"""
 
     signal.signal(signal.SIGINT, timer_interrupted)
@@ -46,7 +48,8 @@ def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time):
         if paused:
             continue
 
-        print_pending_time(seconds)
+        print_time(msg_queue, print_pending_time_msg(seconds))
+
         if pomodoro_ended(since_last_pomodoro, pomodoro_time):
             now = datetime.now()
             log(now, tag, log_file)
@@ -61,11 +64,10 @@ def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time):
     timer_pipe.send("finished")
 
 def timer_interrupted(signum, frame):
-    print("\nRelog apagado")
+    print("\nRelog apagado") # TODO printer
 
-def print_pending_time(seconds):
-    time_str = "{:02d}:{:02d}:{:02d}".format(seconds//3600, (seconds//60) % 60, seconds % 60)
-    print("Faltan para terminar: {}".format(time_str) , end="\r", flush=True)
+def print_pending_time_msg(seconds):
+    return "{:02d}:{:02d}:{:02d}".format(seconds//3600, (seconds//60) % 60, seconds % 60)
 
 def log(now, tag, log_file):
     text = pomo_log_line_entry(now, tag)
@@ -92,13 +94,13 @@ def pomodoro_ended(seconds_since_last_pomodoro, pomodoro_duration_in_minutes):
 def stopwatch_process():
     signal_handler = StopwatchSignalHandler()
     
-    print("\nTemporizador iniciado")
+    print("\nTemporizador iniciado") # TODO printer
 
     while signal_handler.KEEP_PROCESSING:
         time.sleep(1)
         signal_handler.SECONDS_COUNT += 1
 
-    print("\nLa duración del temporizador fue de: {}".format(stopwach_msg(signal_handler.SECONDS_COUNT)))
+    print("\nLa duración del temporizador fue de: {}".format(stopwach_msg(signal_handler.SECONDS_COUNT))) # TODO printer
 
 def stopwach_msg(seconds):
     minutes = math.ceil(seconds/60)
@@ -171,16 +173,101 @@ def audio_process_short(audio_path):
         if os.path.exists(NEW_AUDIO_PATH):
             os.remove(NEW_AUDIO_PATH)
 
+##### printer - outputs to console in one place #####
+
+def print_time(msg_queue, time):
+    _print(msg_queue, Msg(MsgType.Time, time))
+
+def _print(msg_queue, msg): # msg : Msg
+    msg_queue.put(msg)
+
+def printer(msg_queue):
+    last_msg = {"time":"","cmd":"","app":""}
+    lines = []
+
+    while True:
+        while not msg_queue.empty():
+            msg = msg_queue.get()
+
+            if msg.kind == MsgType.Termination:
+                return
+            
+            lines.append(msg)
+
+        line = Msg(MsgType.Empty,"") if not lines else lines.pop()
+
+        str_msg, last_msg = printer_msg(line,last_msg)
+        print(str_msg,
+              end="\r",
+              flush=True)
+              
+        time.sleep(0.1)
+
+def printer_msg(msg, last_msg):
+    line = last_msg
+    match msg.kind:
+        case MsgType.Time:
+            line["time"] = msg.msg
+        case MsgType.Empty:
+            pass
+        case _:
+            raise RuntimeError("msg {} unhandled".format(msg))
+
+    return "Time: {time:8} - cmd msgs: {cmd} - app msgs: {app}".format(**line), line
+
+#def printer(msg_queue):
+#    curses.wrapper(printer_display, msg_queue)
+
+def printer_display(stdscr, msg_queue):
+    curses.curs_set(0)
+    stdscr.clear()
+    stdscr.refresh()
+
+    lines = []
+
+    while True:
+        while not msg_queue.empty():
+            msg = msg_queue.get()
+
+            if msg.type == MsgType.Termination:
+                curses.endwin()
+                return
+            
+            lines.append(msg)
+
+        line = "" if not lines else lines.pop()
+
+        stdscr.clear()
+        stdscr.addstr(1,0,line)
+        stdscr.refresh()
+
+        time.sleep(0.1)
+
+@dc.dataclass
+class Msg:
+    kind : str# type : MsgType
+    msg : str
+
+class MsgType(StrEnum):
+    Time = auto()
+    CmdInfo = auto()
+    Termination = auto()
+    Empty = auto()
+
 ##### main - keyboard manager #####
 
 def main():
     args = read_input()
     config = load_config_from_file(args=args)
 
+    msg_queue = multiprocessing.Queue()
+    printer_process = multiprocessing.Process(target=printer, args=(msg_queue,))
+    printer_process.start()
+
     stopwatch = None
 
     main_pipe, timer_pipe = multiprocessing.Pipe()
-    timer_process = multiprocessing.Process(target=timer, args=(timer_pipe, args.minutes_count, args.tag, config.path_to_log, config.pomodoro_time))
+    timer_process = multiprocessing.Process(target=timer, args=(timer_pipe, args.minutes_count, args.tag, config.path_to_log, config.pomodoro_time, msg_queue))
     timer_process.start()
 
     audio_pipe_father, audio_pipe_child = multiprocessing.Pipe()
@@ -195,7 +282,7 @@ def main():
                 audio_process = play_audio_on_subprocess(config.path_pc, audio_pipe_child)
 
             elif msg == "stoped":
-                print("\nRelog apagado")
+                print("\nRelog apagado") # TODO printer
                 break
 
             elif msg == "audio_pomodoro_finished":
@@ -208,7 +295,7 @@ def main():
             msg = audio_pipe_father.recv()
 
             if msg == "audio_ended":
-                print("\nFelicitaciones por el período de estudio! Te mereces un descanso.")
+                print("\nFelicitaciones por el período de estudio! Te mereces un descanso.") # TODO printer
                 break
 
             else:
@@ -218,11 +305,11 @@ def main():
             key = get_key()
             match key:
                 case "p":
-                    print("\nCuenta atrás pausada.")
+                    print("\nCuenta atrás pausada.") # TODO printer
                     main_pipe.send("pause")
 
                 case "c":
-                    print("\nCuenta atrás reanudada.")
+                    print("\nCuenta atrás reanudada.") # TODO printer
                     main_pipe.send("continue")
 
                 case "f":
@@ -243,7 +330,7 @@ def main():
                         audio_process.join()
 
                 case "h":
-                    print_manual()
+                    print_manual() # TODO printer
 
         except KeyboardInterrupt:
             main_pipe.send("stop")
@@ -294,7 +381,7 @@ def print_manual():
     s   Detener la reproducción del sonido de finalización del timer
     h   Mostrar esta guía de comandos
     """
-    print(manual)
+    print(manual) # TODO printer
 
 def read_input():
     parser = build_parser()
