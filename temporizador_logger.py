@@ -1,6 +1,5 @@
-#!/home/lilmonk3y/Scripts/temporizador_logger/temporizador_logguer/bin/python3
-
-# active venv:  source temporizador_logguer/bin/activate ; deactivate
+#!/opt/cmd_pomodoro/pyenv/bin/python3
+# active venv:  source pyenv/bin/activate ; deactivate
 
 import time
 from datetime import datetime, timedelta
@@ -17,6 +16,11 @@ import dataclasses as dc
 import argparse
 import curses
 from enum import StrEnum, auto
+
+INSTALLATION_PATH = "/opt/cmd_pomodoro"
+CONFIGURATION_PATH = "/etc/opt/cmd_pomodoro"
+TEMPORARY_PATH = "/tmp/cmd_pomodoro"
+DATA_PATH = "/usr/share/cmd_pomodoro"
 
 ##### timer #####
 
@@ -111,10 +115,10 @@ class StopwatchSignalHandler:
 
 ##### audio - play audio on background #####
 
-def audio_process(audio_path, audio_pipe):
+def audio_process(args, audio_path, audio_pipe):
     mp3_path = path_to_file(audio_path)
     audio = pydub.AudioSegment.from_mp3(mp3_path)
-    NEW_AUDIO_PATH = "timer_audio.wav"
+    NEW_AUDIO_PATH = file_path(args, TEMPORARY_PATH, "timer_audio.wav")
 
     try:
         audio.export(NEW_AUDIO_PATH, format="wav")
@@ -152,10 +156,10 @@ def length_in_seconds(file):
         length = wav.getnframes() / float(wav.getframerate())
     return int(length)
 
-def audio_process_short(audio_path):
+def audio_process_short(args, audio_path):
     mp3_path = path_to_file(audio_path)
     audio = pydub.AudioSegment.from_mp3(mp3_path)
-    NEW_AUDIO_PATH = "pomo_audio.wav"
+    NEW_AUDIO_PATH = file_path(args, TEMPORARY_PATH, "pomo_audio.wav")
 
     try:
         audio.export(NEW_AUDIO_PATH, format="wav")
@@ -324,14 +328,14 @@ def main():
 
             if msg == "finished":
                 publish_notification(finished_info_msg(args))
-                audio_process = play_audio_on_subprocess(config.path_pc, audio_pipe_child)
+                audio_process = play_audio_on_subprocess(args, config.path_pc, audio_pipe_child)
 
             elif msg == "stoped":
                 print_app_msg(msg_queue, "Relog apagado")
                 break
 
             elif msg == "audio_pomodoro_finished":
-                 (multiprocessing.Process(target=audio_process_short, args=(config.between_pomodoros_sound,))).start()
+                 (multiprocessing.Process(target=audio_process_short, args=(args, config.between_pomodoros_sound))).start()
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
@@ -422,8 +426,8 @@ def finished_info_msg(args):
             "Felicitaciones por el período de estudio! Te mereces un descanso."
             ]
 
-def play_audio_on_subprocess(audio_track_path, audio_pipe):
-    process = multiprocessing.Process(target=audio_process, args=(audio_track_path, audio_pipe))
+def play_audio_on_subprocess(args, audio_track_path, audio_pipe):
+    process = multiprocessing.Process(target=audio_process, args=(args, audio_track_path, audio_pipe))
     process.start()
     return process
 
@@ -474,6 +478,7 @@ def build_parser():
     return parser
 
 def load_config_from_file(args, file="config.ini"):
+    file = file_path_env_agnostic(CONFIGURATION_PATH, file)    
     if not os.path.exists(file):
         raise RuntimeError("The config file {} doesn't exists".format(file))
     
@@ -506,6 +511,12 @@ class Config:
     between_pomodoros_sound : str
     path_to_log : str
 
+def file_path(args, path, file_name):
+    return os.path.join("", *[path,"test",file_name]) if args.test else os.path.join(path, file_name)
+
+def file_path_env_agnostic(path, file_name):
+    return os.path.join(path, file_name)
+
 def write_config(file="config.ini", env="TEST"):
     config_object = ConfigParser()
 
@@ -517,7 +528,7 @@ def write_config(file="config.ini", env="TEST"):
     "PATH_TO_LOG": "Scripts/temporizador_logger/test/pomodoro_log.md"
     }
 
-    with open('config.ini', 'a') as conf: 
+    with open(file_path_env_agnostic(CONFIGURATION_PATH,"config.ini"), 'a') as conf: 
         config_object.write(conf)
 
 if __name__ == "__main__":
