@@ -5,7 +5,6 @@ CONFIGURATION_PATH="/etc/opt/cmd_pomodoro"
 TEMPORARY_PATH="/tmp/cmd_pomodoro"
 DATA_PATH="/usr/share/cmd_pomodoro"
 REPO="https://github.com/lilmonk3y/cmd_pomodoro.git"
-latest_tag="v0.8.0"
 
 install(){
   mkdir -p ${INSTALLATION_PATH} &&
@@ -22,7 +21,8 @@ install(){
 
   cd ${TEMPORARY_PATH}
 
-  git -c advice.detachedHead=false clone -q --branch ${latest_tag} ${REPO} . 
+  expected_tag=$1
+  git -c advice.detachedHead=false clone -q --branch ${expected_tag} ${REPO} . 
 
   if [ $? -eq 0 ]; then
     echo "Repository cloned ✅"
@@ -67,5 +67,5 @@ uninstall(){
   echo "unalias cmd_pomodoro"
 }
 
-# run function from argument. It must be: install or uninstall
+# run function from argument. It must be: install tag or uninstall
 "$@"
