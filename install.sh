@@ -1,13 +1,13 @@
 #!/bin/bash
 
 INSTALLATION_PATH="/opt/cmd_pomodoro"
-CONFIGURATION_PATH="/etc/opt/cmd_pomodoro"
-TEMPORARY_PATH="/tmp/cmd_pomodoro"
-DATA_PATH="/usr/share/cmd_pomodoro"
+CONFIGURATION_PATH="~/.config/cmd_pomodoro"
+TEMPORARY_PATH="~/.cache/cmd_pomodoro"
+DATA_PATH="~/.local/share/cmd_pomodoro"
 REPO="https://github.com/lilmonk3y/cmd_pomodoro.git"
 
 install(){
-  mkdir -p ${INSTALLATION_PATH} &&
+  sudo mkdir -p ${INSTALLATION_PATH} &&
   mkdir -p ${CONFIGURATION_PATH} &&
   mkdir -p ${TEMPORARY_PATH} &&
   mkdir -p ${DATA_PATH}
@@ -28,18 +28,21 @@ install(){
     echo "Repository cloned ✅"
   fi
 
-  cp -r . ${INSTALLATION_PATH}
+  sudo cp -r . ${INSTALLATION_PATH}
 
   cd ${INSTALLATION_PATH}
 
-  rm -rf .git 
+  sudo rm -rf .git 
 
-  chmod +x temporizador_logger.py
+  sudo chmod +x temporizador_logger.py
 
   echo "Installing dependencies 💪"
   echo ""
 
-  python3 -m venv pyenv && source pyenv/bin/activate && pip3 install -r requirements.txt && deactivate
+  python3 -m venv pyenv && 
+  source pyenv/bin/activate && 
+  pip3 install -r requirements.txt && 
+  deactivate
 
   if [ $? -eq 0 ]; then
     echo ""

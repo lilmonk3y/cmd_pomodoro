@@ -1,5 +1,7 @@
 #!/opt/cmd_pomodoro/pyenv/bin/python3
 # active venv:  source pyenv/bin/activate ; deactivate
+# cmd_pomodoro config -pomodoro_time 30 -finish_audio "Scripts/temporizador_logger/audio/JAAA.mp3" -intermediate_audio "Scripts/temporizador_logger/audio/notification_sound_1.mp3" -log_file "Dropbox/obsidian_sync/obsidian_dropbox/logging/pomodoro_log.md"
+# cmd_pomodoro --test config -pomodoro_time 1 -finish_audio "Scripts/temporizador_logger/audio/JAAA.mp3" -intermediate_audio "Scripts/temporizador_logger/audio/notification_sound_1.mp3" -log_file "Scripts/temporizador_logger/test_log.md"
 
 import time
 from datetime import datetime, timedelta
@@ -18,9 +20,9 @@ import curses
 from enum import StrEnum, auto
 
 INSTALLATION_PATH = "/opt/cmd_pomodoro"
-CONFIGURATION_PATH = "/etc/opt/cmd_pomodoro"
-TEMPORARY_PATH = "/tmp/cmd_pomodoro"
-DATA_PATH = "/usr/share/cmd_pomodoro"
+CONFIGURATION_PATH = ".config/cmd_pomodoro"
+TEMPORARY_PATH = ".cache/cmd_pomodoro"
+DATA_PATH = ".local/share/cmd_pomodoro"
 
 ##### timer #####
 
@@ -118,7 +120,7 @@ class StopwatchSignalHandler:
 def audio_process(args, audio_path, audio_pipe):
     mp3_path = path_to_file(audio_path)
     audio = pydub.AudioSegment.from_mp3(mp3_path)
-    NEW_AUDIO_PATH = file_path(args, TEMPORARY_PATH, "timer_audio.wav")
+    NEW_AUDIO_PATH = file_path_in_home(TEMPORARY_PATH, "timer_audio.wav")
 
     try:
         audio.export(NEW_AUDIO_PATH, format="wav")
@@ -159,7 +161,7 @@ def length_in_seconds(file):
 def audio_process_short(args, audio_path):
     mp3_path = path_to_file(audio_path)
     audio = pydub.AudioSegment.from_mp3(mp3_path)
-    NEW_AUDIO_PATH = file_path(args, TEMPORARY_PATH, "pomo_audio.wav")
+    NEW_AUDIO_PATH = file_path_in_home(TEMPORARY_PATH, "pomo_audio.wav")
 
     try:
         audio.export(NEW_AUDIO_PATH, format="wav")
@@ -307,6 +309,10 @@ class MsgType(StrEnum):
 
 def main():
     args = read_input()
+    if must_config(args):
+        process_config(args)
+        return
+
     config = load_config_from_file(args=args)
 
     msg_queue = multiprocessing.Queue()
@@ -452,45 +458,99 @@ def build_parser():
     parser = argparse.ArgumentParser(
             description="""Es un programa que permite crear temporizadores que siguen 
             metodología pomodoro. Además lleva un registro de los pomodoros hechos
-            e informa por medio de sonidos el estado del temporizador"""
+            e informa por medio de sonidos el estado del temporizador""",
+            prog="cmd_pomodoro"
             )
-    
     parser.add_argument(
-            "minutes_count",
-            type=int,
-            help="""Cantidad de minutos que debe durar el temporizador. Este es el 
-            primer argumento posicional""",
-            )
+            "--test", 
+            action="store_true", 
+            default=False,
+            help="Define la configuración a ser levantada como la de test")
 
-    parser.add_argument(
-            "-tag", "-t",
+    subparser = parser.add_subparsers(
+            dest="cmd", 
+            title="Comandos",
+            help="Tipea 'cmd --help' para obtener más información para cada comando")
+
+    # main command
+    timer_parser = subparser.add_parser("timer", help="Inicia un temporizador por la cantidad de minutos que se le provea como argumento.")
+    timer_parser.add_argument(
+            "minutes_count", 
+            type=int, 
+            help="Cantidad de minutos que debe durar el temporizador. Este es el primer argumento posicional")
+    timer_parser.add_argument(
+            "-tag", "-t", 
+            type=str, 
+            help="Tarea en la que se dedicó el tiempo del pomodoro.")
+
+    # config command
+    config_parser = subparser.add_parser(
+            "config", 
+            help="Definir toda la configuración relevante para el funcionamiento correcto del programa")
+    config_parser.add_argument(
+            "-pomodoro_time", 
+            type=int, 
+            metavar="minutos", 
+            help="Duración de los pomodoros")
+    config_parser.add_argument(
+            "-finish_audio",
+            type=str, 
+            metavar="timer_audio",
+            help="El audio que será reproducido al finalizar el temporizador. Debe ser un path absoluto al archivo.")
+    config_parser.add_argument(
+            "-intermediate_audio", 
             type=str,
-            help="Tarea en la que se dedicó el tiempo del pomodoro."
-            )
-
-    parser.add_argument(
-            "--test",
-            action="store_true",
-            help="Define la configuración a ser levantada como la de test",
-            default=False
-            )
+            metavar="pomodoro_audio",
+            help="El audio que será reproducido al finalizar cada pomodoro. Debe ser un path absoluto al archivo.")
+    config_parser.add_argument(
+            "-log_file", 
+            type=str, 
+            metavar="file",
+            help="Archivo donde se anotarán los pomodoros terminados. Debe ser un path absoluto al archivo.")
     
     return parser
 
-def load_config_from_file(args, file="config.ini"):
-    file = file_path_env_agnostic(CONFIGURATION_PATH, file)    
-    if not os.path.exists(file):
-        raise RuntimeError("The config file {} doesn't exists".format(file))
-    
-    env = "TEST" if args.test else "PRODUCTION"
+def must_config(args):
+    return args.cmd and args.cmd == "config"
+
+def process_config(args, file="config.ini"):
+    config_object = read_config_file(args,file)
+
+    env = "test" if args.test else "production"
+    if env not in config_object:
+        config_object.add_section(env)
+
+    if args.pomodoro_time:
+        config_object[env]["pomodoro_time"] = str(args.pomodoro_time)
+
+    if args.finish_audio:
+        config_object[env]["path_pc"] = args.finish_audio
+
+    if args.intermediate_audio:
+        config_object[env]["between_pomodoros_sound"] = args.intermediate_audio
+
+    if args.log_file:
+        config_object[env]["path_to_log"] = args.log_file
+
+    with open(file_path_in_home(CONFIGURATION_PATH,file), 'w') as conf: 
+        config_object.write(conf)
+
+def read_config_file(args, file):
+    file = file_path_in_home(CONFIGURATION_PATH, file)    
+
     config = ConfigParser()
     config.read(file)
-    if not config[env]:
-        raise RuntimeError("The config file {} doesn't have the expected environment {}.".format(file, env))
 
-    return build_config_file(config[env])
+    return config
 
-def build_config_file(config_map):
+def load_config_from_file(args, file="config.ini"):
+    env = "test" if args.test else "production"
+
+    config = read_config_file(args, file)
+
+    return build_config(config[env])
+
+def build_config(config_map):
     fields = dc.fields(Config)
     field_keys = list(map(lambda f: f.name, fields))
     keys = list(config_map.keys())
@@ -517,19 +577,8 @@ def file_path(args, path, file_name):
 def file_path_env_agnostic(path, file_name):
     return os.path.join(path, file_name)
 
-def write_config(file="config.ini", env="TEST"):
-    config_object = ConfigParser()
-
-    # Add server configuration to the config object
-    config_object[env] = {
-    "POMODORO_TIME": 1,
-    "PATH_PC": "Scripts/temporizador_logger/audio/JAAA.mp3",
-    "BETWEEN_POMODOROS_SOUND": "Scripts/temporizador_logger/audio/notification_sound_1.mp3",
-    "PATH_TO_LOG": "Scripts/temporizador_logger/test/pomodoro_log.md"
-    }
-
-    with open(file_path_env_agnostic(CONFIGURATION_PATH,"config.ini"), 'a') as conf: 
-        config_object.write(conf)
+def file_path_in_home(*paths):
+    return os.path.join(os.path.expanduser('~'), *paths)
 
 if __name__ == "__main__":
     main()
