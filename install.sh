@@ -36,6 +36,9 @@ install(){
 
   sudo chmod +x temporizador_logger.py
 
+  user=$(whoami)
+  sudo chown ${user}:${user} ${INSTALLATION_PATH}
+
   echo "Installing dependencies 💪"
   echo ""
 

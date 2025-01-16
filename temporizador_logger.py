@@ -1,7 +1,4 @@
 #!/opt/cmd_pomodoro/pyenv/bin/python3
-# active venv:  source pyenv/bin/activate ; deactivate
-# cmd_pomodoro config -pomodoro_time 30 -finish_audio "Scripts/temporizador_logger/audio/JAAA.mp3" -intermediate_audio "Scripts/temporizador_logger/audio/notification_sound_1.mp3" -log_file "Dropbox/obsidian_sync/obsidian_dropbox/logging/pomodoro_log.md"
-# cmd_pomodoro --test config -pomodoro_time 1 -finish_audio "Scripts/temporizador_logger/audio/JAAA.mp3" -intermediate_audio "Scripts/temporizador_logger/audio/notification_sound_1.mp3" -log_file "Scripts/temporizador_logger/test_log.md"
 
 import time
 from datetime import datetime, timedelta
@@ -20,7 +17,6 @@ import curses
 from enum import StrEnum, auto
 from shutil import copy as shcopy
 
-INSTALLATION_PATH = "/opt/cmd_pomodoro"
 CONFIGURATION_PATH = ".config/cmd_pomodoro"
 TEMPORARY_PATH = ".cache/cmd_pomodoro"
 DATA_PATH = ".local/share/cmd_pomodoro"
