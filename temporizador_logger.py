@@ -18,6 +18,7 @@ import dataclasses as dc
 import argparse
 import curses
 from enum import StrEnum, auto
+from shutil import copy as shcopy
 
 INSTALLATION_PATH = "/opt/cmd_pomodoro"
 CONFIGURATION_PATH = ".config/cmd_pomodoro"
@@ -524,16 +525,24 @@ def process_config(args, file="config.ini"):
         config_object[env]["pomodoro_time"] = str(args.pomodoro_time)
 
     if args.finish_audio:
-        config_object[env]["path_pc"] = args.finish_audio
+        new_path = copy_file_to_local_data(args.finish_audio, name_in_environment("finish_audio", env))
+        config_object[env]["path_pc"] = new_path
 
     if args.intermediate_audio:
-        config_object[env]["between_pomodoros_sound"] = args.intermediate_audio
+        new_path = copy_file_to_local_data(args.intermediate_audio, name_in_environment("intermediate_audio", env))
+        config_object[env]["between_pomodoros_sound"] = new_path
 
     if args.log_file:
         config_object[env]["path_to_log"] = args.log_file
 
     with open(file_path_in_home(CONFIGURATION_PATH,file), 'w') as conf: 
         config_object.write(conf)
+
+def copy_file_to_local_data(src_path, dst_name):
+    return shcopy(file_path_in_home(src_path), file_path_in_home(DATA_PATH, dst_name))
+
+def name_in_environment(file_name, env):
+    return ".".join((file_name, env))
 
 def read_config_file(args, file):
     file = file_path_in_home(CONFIGURATION_PATH, file)    
