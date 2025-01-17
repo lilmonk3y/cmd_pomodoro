@@ -16,6 +16,7 @@ import argparse
 import curses
 from enum import StrEnum, auto
 from shutil import copy as shcopy
+from pyfiglet import Figlet
 
 CONFIGURATION_PATH = ".config/cmd_pomodoro"
 TEMPORARY_PATH = ".cache/cmd_pomodoro"
@@ -219,21 +220,21 @@ def printer_display(stdscr, msg_queue):
     height, width = stdscr.getmaxyx()
 
     # Calcular dimensiones de las ventanas
-    timer_height = height 
-    manual_height = height // 3
-    command_input_height = manual_height
-    app_messages_height = height - (2 * manual_height)
+    timer_height = height // 2
+    command_input_height = 3
+    manual_height = timer_height
+    app_messages_height = timer_height - command_input_height
 
-    timer_width = width // 2
+    timer_width = width
     manual_width = width // 2
     command_input_width = manual_width
-    app_messages_width = width - manual_width
+    app_messages_width = manual_width
 
     # Crear ventanas
     timer_win = curses.newwin(timer_height, timer_width, 0, 0)
-    manual_win = curses.newwin(manual_height, manual_width, 0, timer_width)
-    command_input_win = curses.newwin(command_input_height, command_input_width, manual_height, manual_width)
-    app_messages_win = curses.newwin(app_messages_height, app_messages_width, 2 * manual_height, manual_width)
+    manual_win = curses.newwin(manual_height, manual_width, timer_height, 0)
+    command_input_win = curses.newwin(command_input_height, command_input_width, timer_height, manual_width)
+    app_messages_win = curses.newwin(app_messages_height, app_messages_width, timer_height + command_input_height, manual_width)
 
     # Dibujar bordes y etiquetas iniciales
     manual_win.box()
@@ -243,7 +244,7 @@ def printer_display(stdscr, msg_queue):
     timer_win.addstr(0, 2, " Tiempo para finalizar ")
 
     command_input_win.box()
-    command_input_win.addstr(0, 2, " Commandos tipeados ")
+    command_input_win.addstr(0, 2, " Comandos tipeados ")
 
     app_messages_win.box()
     app_messages_win.addstr(0, 2, " Mensajes de la aplicación ")
@@ -251,8 +252,8 @@ def printer_display(stdscr, msg_queue):
     # Refrescar ventanas
     timer_win.refresh()
 
-    for index, line in enumerate(app_manual().splitlines()):
-        manual_win.addstr(index+1, 1, line)
+    for index, line in enumerate(list(filter(None,app_manual().splitlines()))):
+        manual_win.addstr(index+2, 1, line)
     manual_win.refresh()
 
     command_input_win.refresh()
@@ -260,6 +261,10 @@ def printer_display(stdscr, msg_queue):
 
     last_state = {"time":"","app":[],"cmd":""} # TODO create State class
     lines = []
+
+    huge_letters = Figlet(font="standard")
+    letters_start_position_y = timer_height // 3 + 2
+    letters_start_position_x = timer_width // 3 + 7
 
     while True:
         while not msg_queue.empty():
@@ -270,12 +275,15 @@ def printer_display(stdscr, msg_queue):
             
             lines.append(msg)
 
-        line = Msg(MsgType.Empty,"") if not lines else lines.pop()
+        if not lines:
+            time.sleep(0.2)
+            continue
+        line = lines.pop()
 
         state = curr_state(line,last_state)
 
         
-        timer_win.addstr(1, 1,state["time"])
+        render_time(timer_win, timer_width, letters_start_position_y, letters_start_position_x, huge_letters, state["time"] )
         timer_win.refresh()
 
         command_input_win.addstr(1, 1, "Cmd key pressed: {}".format(state["cmd"]))
@@ -287,8 +295,16 @@ def printer_display(stdscr, msg_queue):
         app_messages_win.refresh()
 
 
-        time.sleep(0.5)
         last_state = state
+
+def render_time(timer_win, timer_win_width, start_pos_y, start_pos_x, figlet_render, time_str):
+    numbers_splited = time_str.split(":")
+    time = " : ".join(numbers_splited)
+    figlet_str = figlet_render.renderText(time)
+    
+    for index, line in enumerate(figlet_str.splitlines()):
+        timer_win.addstr(start_pos_y + index, 1, " " * (timer_win_width - 2))  # Limpiar la línea
+        timer_win.addstr(start_pos_y + index, start_pos_x, line.rstrip())
 
 @dc.dataclass(frozen=True)
 class Msg:
