@@ -465,7 +465,7 @@ def get_key():
     return None
 
 def publish_notification(msgs):
-    subprocess.run(["notify-send", *msgs, "-a", "cmd_pomodoro", "-t", "10"])
+    subprocess.run(["notify-send", *msgs, "-a", "cmd_pomodoro", "-t", "60"])
 
 def finished_info_msg(args):
     summary_msg = "Finalizó el temporizador de {} minutos".format(args.minutes_count)
