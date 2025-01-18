@@ -188,26 +188,6 @@ def print_terminate(msg_queue):
 def _print(msg_queue, msg): # msg : Msg
     msg_queue.put(msg)
 
-def curr_state(msg, last_state):
-    state = last_state
-    match msg.kind:
-        case MsgType.Time:
-            state["time"] = msg.msg
-
-        case MsgType.App:
-            state["app"].append(msg.msg)
-
-        case MsgType.Cmd:
-            state["cmd"] = msg.msg
-
-        case MsgType.Empty:
-            pass
-
-        case _:
-            raise RuntimeError("msg {} unhandled".format(msg))
-
-    return state
-
 def printer(msg_queue):
     curses.wrapper(printer_display, msg_queue)
 
@@ -259,8 +239,9 @@ def printer_display(stdscr, msg_queue):
     command_input_win.refresh()
     app_messages_win.refresh()
 
-    last_state = {"time":"","app":[],"cmd":""} # TODO create State class
+    last_state = {"time":"","app":[],"cmd":"","mode":Modes.Running} # TODO create State class
     lines = []
+    timer_effect = []
 
     huge_letters = Figlet(font="standard")
     letters_start_position_y = timer_height // 3 + 2
@@ -276,17 +257,29 @@ def printer_display(stdscr, msg_queue):
             lines.append(msg)
 
         if not lines:
-            time.sleep(0.2)
-            continue
-        line = lines.pop()
+            state = last_state
+        else:
+            line = lines.pop()
+            state = curr_state(line,last_state)
 
-        state = curr_state(line,last_state)
 
+        if last_state["mode"] != state["mode"]:
+            if state["mode"] == Modes.Stopped:
+                timer_effect = stopped_effect()
+            elif state["mode"] == Modes.Running:
+                timer_effect = []
+        else:
+            timer_is_paused_and_effect_must_be_refilled = state["mode"] == Modes.Stopped and not timer_effect
+            if timer_is_paused_and_effect_must_be_refilled:
+                timer_effect = stopped_effect()
         
-        render_time(timer_win, timer_width, letters_start_position_y, letters_start_position_x, huge_letters, state["time"] )
+        if state["mode"] == Modes.Running:
+            render_time(timer_win, timer_width, letters_start_position_y, letters_start_position_x, huge_letters, state["time"])
+        else:
+            render_time_with_effect(timer_effect,timer_win, timer_width, letters_start_position_y, letters_start_position_x, huge_letters, state["time"])
         timer_win.refresh()
 
-        command_input_win.addstr(1, 1, "Cmd key pressed: {}".format(state["cmd"]))
+        command_input_win.addstr(1, 1, "Último comando presionado: {}".format(state["cmd"]))
         command_input_win.refresh()
 
         for index, msg in enumerate(list(reversed(state["app"]))[:app_messages_height-2]):
@@ -296,6 +289,31 @@ def printer_display(stdscr, msg_queue):
 
 
         last_state = state
+        time.sleep(0.2)
+
+def curr_state(msg, last_state):
+    state = last_state
+    match msg.kind:
+        case MsgType.Time:
+            state["time"] = msg.msg
+
+        case MsgType.App:
+            state["app"].append(msg.msg)
+
+        case MsgType.Cmd:
+            state["cmd"] = msg.msg
+            if msg.msg == "p":
+                state["mode"] = Modes.Stopped
+            else:
+                state["mode"] = Modes.Running
+
+        case MsgType.Empty:
+            pass
+
+        case _:
+            raise RuntimeError("msg {} unhandled".format(msg))
+
+    return state
 
 def render_time(timer_win, timer_win_width, start_pos_y, start_pos_x, figlet_render, time_str):
     numbers_splited = time_str.split(":")
@@ -305,6 +323,18 @@ def render_time(timer_win, timer_win_width, start_pos_y, start_pos_x, figlet_ren
     for index, line in enumerate(figlet_str.splitlines()):
         timer_win.addstr(start_pos_y + index, 1, " " * (timer_win_width - 2))  # Limpiar la línea
         timer_win.addstr(start_pos_y + index, start_pos_x, line.rstrip())
+
+def render_time_with_effect(timer_effect, timer_win, timer_win_width, start_pos_y, start_pos_x, figlet_render, time_str):
+    effect = timer_effect.pop()
+    if effect:
+        render_time(timer_win, timer_win_width, start_pos_y, start_pos_x, figlet_render, time_str)
+    else:
+        timer_win.erase()
+        timer_win.box()
+        timer_win.addstr(0, 2, " Tiempo para finalizar ")
+
+def stopped_effect():
+    return [False,False,False,True,True,True]
 
 @dc.dataclass(frozen=True)
 class Msg:
@@ -317,6 +347,10 @@ class MsgType(StrEnum):
     Cmd = auto()
     Termination = auto()
     Empty = auto()
+
+class Modes(StrEnum):
+    Running = auto()
+    Stopped = auto()
 
 ##### main - keyboard manager #####
 
