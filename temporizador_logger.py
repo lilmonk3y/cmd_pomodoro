@@ -17,6 +17,8 @@ import curses
 from enum import StrEnum, auto
 from shutil import copy as shcopy
 from pyfiglet import Figlet
+from abc import abstractmethod, ABC
+from typing import Any
 
 CONFIGURATION_PATH = ".config/cmd_pomodoro"
 TEMPORARY_PATH = ".cache/cmd_pomodoro"
@@ -156,7 +158,7 @@ def length_in_seconds(file):
         length = wav.getnframes() / float(wav.getframerate())
     return int(length)
 
-def audio_process_short(args, audio_path):
+def audio_process_short(args, audio_path, msg_queue):
     mp3_path = path_to_file(audio_path)
     audio = pydub.AudioSegment.from_mp3(mp3_path)
     NEW_AUDIO_PATH = file_path_in_home(TEMPORARY_PATH, "pomo_audio.wav")
@@ -168,6 +170,7 @@ def audio_process_short(args, audio_path):
         time.sleep(length_in_seconds(NEW_AUDIO_PATH))
 
     finally:
+        print_audio_stopped(msg_queue)
         if os.path.exists(NEW_AUDIO_PATH):
             os.remove(NEW_AUDIO_PATH)
 
@@ -184,6 +187,12 @@ def print_cmd_msg(msg_queue, msg):
 
 def print_terminate(msg_queue):
     _print(msg_queue, Msg(MsgType.Termination, ""))
+
+def print_playback(msg_queue):
+    _print(msg_queue, Msg(MsgType.AudioPlayback, ""))
+
+def print_audio_stopped(msg_queue):
+    _print(msg_queue, Msg(MsgType.AudioStopped, ""))
 
 def _print(msg_queue, msg): # msg : Msg
     msg_queue.put(msg)
@@ -241,7 +250,7 @@ def printer_display(stdscr, msg_queue):
 
     last_state = {"time":"","app":[],"cmd":"","mode":Modes.Running} # TODO create State class
     lines = []
-    timer_effect = []
+    timer_effect = NoneTextEffect() 
 
     huge_letters = Figlet(font="standard")
     letters_start_position_y = timer_height // 3 + 2
@@ -265,18 +274,25 @@ def printer_display(stdscr, msg_queue):
 
         if last_state["mode"] != state["mode"]:
             if state["mode"] == Modes.Stopped:
-                timer_effect = stopped_effect()
+                timer_effect = BlinkTextEffect()
+
+            elif state["mode"] == Modes.AudioPlayback:
+                timer_effect = SlideTextEffect()
+
             elif state["mode"] == Modes.Running:
-                timer_effect = []
+                timer_effect = NoneTextEffect()
+
         else:
-            timer_is_paused_and_effect_must_be_refilled = state["mode"] == Modes.Stopped and not timer_effect
-            if timer_is_paused_and_effect_must_be_refilled:
-                timer_effect = stopped_effect()
+            if timer_effect.empty():
+                timer_effect.refill()
         
-        if state["mode"] == Modes.Running:
-            render_time(timer_win, timer_width, letters_start_position_y, letters_start_position_x, huge_letters, state["time"])
-        else:
-            render_time_with_effect(timer_effect,timer_win, timer_width, letters_start_position_y, letters_start_position_x, huge_letters, state["time"])
+        timer_effect.render(TimerRenderInput(
+            window=timer_win, 
+            window_width=timer_width, 
+            start_y=letters_start_position_y, 
+            start_x=letters_start_position_x, 
+            figlet_render=huge_letters, 
+            time_str=state["time"]))
         timer_win.refresh()
 
         command_input_win.addstr(1, 1, "Último comando presionado: {}".format(state["cmd"]))
@@ -290,6 +306,7 @@ def printer_display(stdscr, msg_queue):
 
         last_state = state
         time.sleep(0.2)
+
 
 def curr_state(msg, last_state):
     state = last_state
@@ -307,6 +324,12 @@ def curr_state(msg, last_state):
             else:
                 state["mode"] = Modes.Running
 
+        case MsgType.AudioPlayback:
+            state["mode"] = Modes.AudioPlayback
+
+        case MsgType.AudioStopped:
+            state["mode"] = Modes.Running
+
         case MsgType.Empty:
             pass
 
@@ -315,26 +338,108 @@ def curr_state(msg, last_state):
 
     return state
 
-def render_time(timer_win, timer_win_width, start_pos_y, start_pos_x, figlet_render, time_str):
-    numbers_splited = time_str.split(":")
+def render_time(timer_obj):
+    numbers_splited = timer_obj.time_str.split(":")
     time = " : ".join(numbers_splited)
-    figlet_str = figlet_render.renderText(time)
-    
+    figlet_str = timer_obj.figlet_render.renderText(time)
+
     for index, line in enumerate(figlet_str.splitlines()):
-        timer_win.addstr(start_pos_y + index, 1, " " * (timer_win_width - 2))  # Limpiar la línea
-        timer_win.addstr(start_pos_y + index, start_pos_x, line.rstrip())
+        timer_obj.window.addstr( timer_obj.start_y + index, 1, 
+                " " * (timer_obj.window_width - 2))  # Limpiar la línea
+        timer_obj.window.addstr(
+                timer_obj.start_y + index, 
+                timer_obj.start_x, 
+                line.rstrip())
 
-def render_time_with_effect(timer_effect, timer_win, timer_win_width, start_pos_y, start_pos_x, figlet_render, time_str):
-    effect = timer_effect.pop()
-    if effect:
-        render_time(timer_win, timer_win_width, start_pos_y, start_pos_x, figlet_render, time_str)
-    else:
-        timer_win.erase()
-        timer_win.box()
-        timer_win.addstr(0, 2, " Tiempo para finalizar ")
+class TextEffect(ABC):
+    @abstractmethod
+    def empty(self):
+        pass
 
-def stopped_effect():
-    return [False,False,False,True,True,True]
+    @abstractmethod
+    def refill(self):
+        pass
+
+    @abstractmethod
+    def render(self, timer_render_obj):
+        pass
+
+class NoneTextEffect(TextEffect):
+    def empty(self):
+        return False
+
+    def refill(self):
+        pass
+
+    def render(self, timer_render_obj):
+        render_time(timer_render_obj)
+
+class SlideTextEffect(TextEffect):
+    def __init__(self):
+        self._fill()
+        self._position_to_affect = 0
+
+    def empty(self):
+        return self.period == []
+
+    def refill(self):
+        self._fill()
+
+    def render(self, timer_render_obj):
+        frame = self._frame()
+        if frame:
+            timer_render_obj.time_str = self._slide_effect(timer_render_obj.time_str)
+            render_time(timer_render_obj)
+        else:
+            render_time(timer_render_obj)
+
+    def _slide_effect(self, time_str):
+        res = time_str
+        res[self._position_to_affect] = " "
+
+        self._position_to_affect = (self._position_to_affect + 1) % len(time_str)
+
+        return res
+    
+    def _frame(self):
+        return self.period.pop()
+
+    def _fill(self):
+        self.period = [True,False]
+
+class BlinkTextEffect(TextEffect):
+    def __init__(self):
+        self._fill()
+
+    def empty(self):
+        return self.period == []
+
+    def refill(self):
+        self._fill()
+
+    def render(self, timer_render_obj):
+        frame = self._frame()
+        if frame:
+            render_time(timer_render_obj)
+        else:
+            timer_render_obj.window.erase()
+            timer_render_obj.window.box()
+            timer_render_obj.window.addstr(0, 2, " Tiempo para finalizar ")
+
+    def _frame(self):
+        return self.period.pop()
+
+    def _fill(self):
+        self.period = [False,False,False,True,True,True]
+
+@dc.dataclass
+class TimerRenderInput():
+    window : Any
+    window_width : int
+    start_y : int
+    start_x : int
+    figlet_render : Any
+    time_str : str
 
 @dc.dataclass(frozen=True)
 class Msg:
@@ -346,11 +451,14 @@ class MsgType(StrEnum):
     App = auto()
     Cmd = auto()
     Termination = auto()
+    AudioPlayback = auto()
+    AudioStopped = auto()
     Empty = auto()
 
 class Modes(StrEnum):
     Running = auto()
     Stopped = auto()
+    AudioPlayback = auto()
 
 ##### main - keyboard manager #####
 
@@ -381,6 +489,7 @@ def main():
 
             if msg == "finished":
                 publish_notification(finished_info_msg(args))
+                print_playback(msg_queue)
                 audio_process = play_audio_on_subprocess(args, config.path_pc, audio_pipe_child)
 
             elif msg == "stoped":
@@ -388,7 +497,8 @@ def main():
                 break
 
             elif msg == "audio_pomodoro_finished":
-                 (multiprocessing.Process(target=audio_process_short, args=(args, config.between_pomodoros_sound))).start()
+                print_playback(msg_queue)
+                (multiprocessing.Process(target=audio_process_short, args=(args, config.between_pomodoros_sound, msg_queue))).start()
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
@@ -397,6 +507,7 @@ def main():
             msg = audio_pipe_father.recv()
 
             if msg == "audio_ended":
+                print_audio_stopped(msg_queue)
                 print_app_msg(msg_queue, "Felicitaciones por el período de estudio! Te mereces un descanso.")
                 time.sleep(2)
                 break
