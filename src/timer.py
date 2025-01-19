@@ -20,7 +20,7 @@ def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time, msg_queue):
             elif msg == "continue":
                 paused = False
             elif msg == "stop":
-                timer_pipe.send("stoped") # TODO fix typo
+                timer_pipe.send("stopped")
                 return
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by timer")

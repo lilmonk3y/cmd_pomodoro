@@ -60,7 +60,7 @@ def main():
                 event_playback(msg_queue)
                 audio_process = play_audio_on_subprocess(args, config.path_pc, audio_pipe_child)
 
-            elif msg == "stoped":
+            elif msg == "stopped":
                 print_app_msg(msg_queue, "Relog apagado")
                 break
 
