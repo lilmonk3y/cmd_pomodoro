@@ -531,6 +531,8 @@ def main():
     audio_pipe_father, audio_pipe_child = multiprocessing.Pipe()
     audio_process = None
 
+    paused = False
+
     while True:
         if main_pipe.poll():
             msg = main_pipe.recv()
@@ -567,12 +569,20 @@ def main():
             key = get_key()
             match key:
                 case "p":
+                    if paused:
+                        continue
+
+                    paused = True
                     print_cmd_msg(msg_queue,"p")
                     event_stopped(msg_queue)
                     print_app_msg(msg_queue,"Cuenta atrás pausada.")
                     main_pipe.send("pause")
 
                 case "c":
+                    if not paused:
+                        continue
+
+                    paused = False
                     print_cmd_msg(msg_queue,"c")
                     event_resumed(msg_queue)
                     print_app_msg(msg_queue,"Cuenta atrás reanudada.")
@@ -593,13 +603,10 @@ def main():
                         stopwatch.start()
                 
                 case "s":
-                    print_cmd_msg(msg_queue,"s")
                     if audio_process:
+                        print_cmd_msg(msg_queue,"s")
                         audio_pipe_father.send("audio_terminate")
                         audio_process.join()
-
-                case "h":
-                    print_cmd_msg(msg_queue,"h")
 
         except KeyboardInterrupt:
             main_pipe.send("stop")
@@ -653,7 +660,6 @@ def app_manual():
     f   Finalizar el temporizador
     t   Iniciar un stopwatch
     s   Detener la reproducción del sonido de finalización del timer
-    h   Mostrar esta guía de comandos
     """
     return manual
 
