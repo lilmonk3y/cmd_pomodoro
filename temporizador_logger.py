@@ -301,6 +301,8 @@ class TimerWindow(Window):
         self._start_y = height // 3 + 2
         self._start_x = width // 3 + 7
 
+        self._logger = logging.getLogger(".timer_window")
+
     def refresh(self, last_state, state):
         if last_state["mode"] != state["mode"]:
             if state["mode"] == Modes.Stopped:
@@ -352,18 +354,22 @@ class Printer:
         self._windows = windows
         self._must_update = datetime.now()
         self._must_finish = False
+        self._logger = logging.getLogger(".printer")
+        self._last_state_refreshed = None
 
     def run(self, state, msg_queue):
-        last_state = state
+        self._last_state_refreshed = dict(state)
+        last_state = dict(state)
 
         while True and not self._must_finish:
-            state = self._process_new_msgs(msg_queue, last_state)
+            new_state = self._process_new_msgs(msg_queue, last_state)
 
-            self._refresh_if_have_to(last_state, state)
-            last_state = state
+            self._refresh_if_have_to(new_state)
+
+            last_state = dict(new_state)
 
     def _process_new_msgs(self, msg_queue, last_state):
-        state = last_state
+        state = dict(last_state)
 
         while not msg_queue.empty():
             msg = msg_queue.get()
@@ -375,6 +381,16 @@ class Printer:
             state = self._curr_state(msg, state)
 
         return state
+
+    def _refresh_if_have_to(self, state):
+        if not self._time_is_up():
+            return
+        
+        for window in self._windows:
+            window.refresh(self._last_state_refreshed, state)
+
+        self._last_state_refreshed = dict(state)
+        self._set_next_update()
 
     def _curr_state(self, msg, last_state):
         state = dict(last_state)
@@ -409,16 +425,7 @@ class Printer:
                 raise RuntimeError("msg {} unhandled".format(msg))
 
         return state
-
-    def _refresh_if_have_to(self, last_state, state):
-        if not self._time_is_up():
-            return
-        
-        for window in self._windows:
-            window.refresh(last_state, state)
-
-        self._set_next_update()
-
+    
     def _time_is_up(self):
         return self._must_update < datetime.now()
 
@@ -484,7 +491,7 @@ class SlideTextEffect(TextEffect):
         return self._period.pop()
 
     def _fill(self):
-        self._period = [True,False,False,False]
+        self._period = [True,False]
 
     def _find_next_non_empty_position(self, chr_list):
         for index in range(self._position_to_affect, len(chr_list)):
@@ -519,7 +526,7 @@ class BlinkTextEffect(TextEffect):
         return self._period.pop()
 
     def _fill(self):
-        self._period = [False,False,False,True,True,True]
+        self._period = [False,True]
 
 def render_time(timer_obj):
     figlet_str = timer_obj.figlet_render.renderText(timer_obj.time_str)
