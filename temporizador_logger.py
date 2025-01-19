@@ -482,7 +482,7 @@ class SlideTextEffect(TextEffect):
         res = list(time_str)
 
         self._find_next_non_empty_position(res)
-        res[self._position_to_affect] = '_'
+        res[self._position_to_affect] = '*'
         self._position_to_affect = (self._position_to_affect + 1) % len(time_str)
         
         return "".join(res)
@@ -495,7 +495,8 @@ class SlideTextEffect(TextEffect):
 
     def _find_next_non_empty_position(self, chr_list):
         for index in range(self._position_to_affect, len(chr_list)):
-            if chr_list[index] != " ":
+            elem = chr_list[index]
+            if elem != " " and elem != ":":
                 self._position_to_affect = index
                 return
 
