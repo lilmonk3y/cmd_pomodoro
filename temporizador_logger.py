@@ -257,117 +257,173 @@ def printer_display(stdscr, msg_queue):
     command_input_win.refresh()
     app_messages_win.refresh()
 
-    last_state = {"time":"","app":[],"cmd":"","mode":Modes.Running} # TODO create State class
-    lines = []
-    timer_effect = NoneTextEffect() 
+    init_state = {"time":"","app":[],"cmd":"","mode":Modes.Running} # TODO create State class
+    (Printer(
+        CommandInputWindow(
+            window=command_input_win,
+            width=command_input_width,
+            height=command_input_height
+            ),
+        AppMessagesWindow(
+            window=app_messages_win,
+            width=app_messages_width,
+            height=app_messages_height
+            ),
+        TimerWindow(
+            window=timer_win,
+            width=timer_width,
+            height=timer_height
+            )
+        )).run( 
+               state = init_state, 
+               msg_queue=msg_queue
+               )
 
-    huge_letters = Figlet(font="standard")
-    letters_start_position_y = timer_height // 3 + 2
-    letters_start_position_x = timer_width // 3 + 7
+class Window:
+    def __init__(self, window, width, height):
+        self.window = window
+        self.width = width
+        self.height = height
 
-    while True:
-        while not msg_queue.empty():
-            msg = msg_queue.get()
+    def refresh(self, last_state, state):
+        raise RuntimeError("Shouldn't be used")
 
-            if msg.kind == MsgType.Termination:
-                return
-            
-            lines.append(msg)
+    def _refresh(self):
+        self.window.refresh()
 
-        if not lines:
-            state = last_state
-        else:
-            line = lines.pop()
-            state = curr_state(line, last_state)
+class TimerWindow(Window):
+    def __init__(self,window, width, height):
+        super().__init__(window, width, height)
 
+        self._text_effect = NoneTextEffect()
+        self._figlet = Figlet(font="standard")
 
+        self._start_y = height // 3 + 2
+        self._start_x = width // 3 + 7
+
+    def refresh(self, last_state, state):
         if last_state["mode"] != state["mode"]:
             if state["mode"] == Modes.Stopped:
-                timer_effect = BlinkTextEffect()
+                self._text_effect = BlinkTextEffect()
 
             elif state["mode"] == Modes.AudioPlayback:
-                timer_effect = SlideTextEffect()
+                self._text_effect = SlideTextEffect()
 
             elif state["mode"] == Modes.Running:
-                timer_effect = NoneTextEffect()
+                self._text_effect = NoneTextEffect()
 
             else:
                 raise RuntimeError("Mode {} is unhandled".format(state["mode"]))
 
         else:
-            if timer_effect.empty():
-                timer_effect.refill()
+            if self._text_effect.empty():
+                self._text_effect.refill()
         
-        timer_effect.render(TimerRenderInput(
-            window=timer_win, 
-            window_width=timer_width, 
-            start_y=letters_start_position_y, 
-            start_x=letters_start_position_x, 
-            figlet_render=huge_letters, 
-            time_str=figlet_readable_str(state["time"])))
-        timer_win.refresh()
+        self._text_effect.render(TimerRenderInput(
+            window=self.window, 
+            window_width=self.width, 
+            start_y=self._start_y, 
+            start_x=self._start_x, 
+            figlet_render=self._figlet, 
+            time_str=self._figlet_readable_str(state["time"])))
 
-        command_input_win.addstr(1, 1, "Último comando presionado: {}".format(state["cmd"]))
-        command_input_win.refresh()
+        self._refresh()
 
-        for index, msg in enumerate(list(reversed(state["app"]))[:app_messages_height-2]):
-            app_messages_win.addstr(index+1,1," " * (app_messages_width - 2))  # Limpiar la línea
-            app_messages_win.addstr(index+1,1,msg)
-        app_messages_win.refresh()
+    def _figlet_readable_str(self, time_str):
+        numbers_splited = time_str.split(":")
+        return " : ".join(numbers_splited)
 
+class AppMessagesWindow(Window):
+    def refresh(self, _, state):
+        for index, msg in enumerate(list(reversed(state["app"]))[:self.height-2]):
+            self.window.addstr(index+1,1," " * (self.width - 2))  # Limpiar la línea
+            self.window.addstr(index+1,1,msg)
 
+        self._refresh()
+
+class CommandInputWindow(Window):
+    def refresh(self, _, state):
+        self.window.addstr(1, 1, "Último comando presionado: {}".format(state["cmd"]))
+
+        self._refresh()
+
+class Printer:
+    def __init__(self, *windows):
+        self._windows = windows
+        self._must_update = datetime.now()
+        self._must_finish = False
+
+    def run(self, state, msg_queue):
         last_state = state
-        time.sleep(0.2)
 
+        while True and not self._must_finish:
+            state = self._process_new_msgs(msg_queue, last_state)
 
-def curr_state(msg, last_state):
-    state = dict(last_state)
-    match msg.kind:
-        case MsgType.Time:
-            state["time"] = msg.msg
+            self._refresh_if_have_to(last_state, state)
+            last_state = state
 
-        case MsgType.App:
-            state["app"].append(msg.msg)
+    def _process_new_msgs(self, msg_queue, last_state):
+        state = last_state
 
-        case MsgType.Cmd:
-            state["cmd"] = msg.msg
+        while not msg_queue.empty():
+            msg = msg_queue.get()
 
-        case MsgType.Event:
-            match msg.msg:
-                case Event.AudioPlayback:
-                    state["mode"] = Modes.AudioPlayback
+            if msg.kind == MsgType.Termination:
+                self._must_finish = True
+                return state
+            
+            state = self._curr_state(msg, state)
 
-                case Event.Stopped:
-                    state["mode"] = Modes.Stopped
+        return state
 
-                case Event.AudioStopped | Event.Resumed:
-                    state["mode"] = Modes.Running
+    def _curr_state(self, msg, last_state):
+        state = dict(last_state)
+        match msg.kind:
+            case MsgType.Time:
+                state["time"] = msg.msg
 
-                case _:
-                    raise RuntimeError("Event {} unhandled".format(msg.msg))
+            case MsgType.App:
+                state["app"].append(msg.msg)
 
-        case MsgType.Empty:
-            pass
+            case MsgType.Cmd:
+                state["cmd"] = msg.msg
 
-        case _:
-            raise RuntimeError("msg {} unhandled".format(msg))
+            case MsgType.Event:
+                match msg.msg:
+                    case Event.AudioPlayback:
+                        state["mode"] = Modes.AudioPlayback
 
-    return state
+                    case Event.Stopped:
+                        state["mode"] = Modes.Stopped
 
-def figlet_readable_str(time_str):
-    numbers_splited = time_str.split(":")
-    return " : ".join(numbers_splited)
+                    case Event.AudioStopped | Event.Resumed:
+                        state["mode"] = Modes.Running
 
-def render_time(timer_obj):
-    figlet_str = timer_obj.figlet_render.renderText(timer_obj.time_str)
+                    case _:
+                        raise RuntimeError("Event {} unhandled".format(msg.msg))
 
-    for index, line in enumerate(figlet_str.splitlines()):
-        timer_obj.window.addstr( timer_obj.start_y + index, 1, 
-                " " * (timer_obj.window_width - 2))  # Limpiar la línea
-        timer_obj.window.addstr(
-                timer_obj.start_y + index, 
-                timer_obj.start_x, 
-                line.rstrip())
+            case MsgType.Empty:
+                pass
+
+            case _:
+                raise RuntimeError("msg {} unhandled".format(msg))
+
+        return state
+
+    def _refresh_if_have_to(self, last_state, state):
+        if not self._time_is_up():
+            return
+        
+        for window in self._windows:
+            window.refresh(last_state, state)
+
+        self._set_next_update()
+
+    def _time_is_up(self):
+        return self._must_update < datetime.now()
+
+    def _set_next_update(self):
+        self._must_update = datetime.now() + timedelta(seconds=0.5)
 
 class TextEffect(ABC):
     @abstractmethod
@@ -464,6 +520,17 @@ class BlinkTextEffect(TextEffect):
 
     def _fill(self):
         self._period = [False,False,False,True,True,True]
+
+def render_time(timer_obj):
+    figlet_str = timer_obj.figlet_render.renderText(timer_obj.time_str)
+
+    for index, line in enumerate(figlet_str.splitlines()):
+        timer_obj.window.addstr( timer_obj.start_y + index, 1, 
+                " " * (timer_obj.window_width - 2))  # Limpiar la línea
+        timer_obj.window.addstr(
+                timer_obj.start_y + index, 
+                timer_obj.start_x, 
+                line.rstrip())
 
 @dc.dataclass
 class TimerRenderInput():
