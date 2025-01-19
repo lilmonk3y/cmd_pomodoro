@@ -34,7 +34,7 @@ install(){
 
   sudo rm -rf .git 
 
-  sudo chmod +x temporizador_logger.py
+  sudo chmod +x src/temporizador_logger.py
 
   user=$(whoami)
   sudo chown ${user}:${user} ${INSTALLATION_PATH}
@@ -55,7 +55,7 @@ install(){
 
   echo ""
   echo "add next line to ~/.zshrc"
-  echo "alias cmd_pomodoro='${INSTALLATION_PATH}/temporizador_logger.py'"
+  echo "alias cmd_pomodoro='${INSTALLATION_PATH}/src/temporizador_logger.py'"
 }
 
 uninstall(){
