@@ -1,3 +1,5 @@
+![App layout example](.readme-images/app_layout.png)
+
 # Instalarlo
 
 Tenes que estar en un sistema Linux, ya que en otros sistemas el programa no anda por el momento.
