@@ -38,14 +38,41 @@ def main():
     printer_process = multiprocessing.Process(target=printer, args=(msg_queue,))
     printer_process.start()
 
-    stopwatch = None
-
     main_pipe, timer_pipe = multiprocessing.Pipe()
-    timer_process = multiprocessing.Process(target=timer, args=(timer_pipe, args.minutes_count, args.tag, config.path_to_log, config.pomodoro_time, msg_queue))
+    timer_process = None
+    can_pause = True
+    if config.cmd == "timer":
+        timer_process = multiprocessing.Process(
+                target=timer, 
+                args=(
+                    timer_pipe, 
+                    args.minutes_count, 
+                    args.tag, 
+                    config.path_to_log, 
+                    config.pomodoro_time, 
+                    msg_queue))
+
+    elif config.cmd == "pomodoro":
+        timer_process = multiprocessing.Process(
+                target=pomodoro,
+                args=(timer_pipe,
+                      args.pomodoros,
+                      args.tag,
+                      config.pomodoro_time,
+                      config.pomodoro_break_duration,
+                      config.path_to_log,
+                      msg_queue))
+                )
+        can_pause = False
+    else:
+        raise RuntimeError("Comando {} desconocido")
+
     timer_process.start()
 
     audio_pipe_father, audio_pipe_child = multiprocessing.Pipe()
     audio_process = None
+
+    stopwatch = None
 
     paused = False
 
@@ -65,6 +92,10 @@ def main():
             elif msg == "audio_pomodoro_finished":
                 event_playback(msg_queue)
                 (multiprocessing.Process(target=audio_process_short, args=(args, config.between_pomodoros_sound, msg_queue))).start()
+
+            elif msg == "audio_break_ended":
+                event_playback(msg_queue)
+                (multiprocessing.Process(target=audio_process_short, args=(args, config.audio_pomodoro_finished, msg_queue))).start()
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
@@ -86,6 +117,9 @@ def main():
             match key:
                 case "p":
                     if paused:
+                        continue
+
+                    if not can_pause:
                         continue
 
                     paused = True
@@ -191,13 +225,24 @@ def build_parser():
             title="Comandos",
             help="Tipea 'cmd --help' para obtener más información para cada comando")
 
-    # main command
+    # timer command
     timer_parser = subparser.add_parser("timer", help="Inicia un temporizador por la cantidad de minutos que se le provea como argumento.")
     timer_parser.add_argument(
             "minutes_count", 
             type=int, 
             help="Cantidad de minutos que debe durar el temporizador. Este es el primer argumento posicional")
     timer_parser.add_argument(
+            "-tag", "-t", 
+            type=str, 
+            help="Tarea en la que se dedicó el tiempo del pomodoro.")
+
+    # pomodoro command
+    pomodoro_parser = subparser.add_parser("pomodoro", help="Comienza tantos pomodoros como se pase por argumento.")
+    pomodoro_parser.add_argument(
+            "amount_of_pomodoros", 
+            type=int, 
+            help="Cantidad de pomodoros que se quiere realizar. Al final de cada intervalo habrá un periodo de descanso.")
+    pomodoro_parser.add_argument(
             "-tag", "-t", 
             type=str, 
             help="Tarea en la que se dedicó el tiempo del pomodoro.")
@@ -212,6 +257,11 @@ def build_parser():
             metavar="minutos", 
             help="Duración de los pomodoros")
     config_parser.add_argument(
+            "-pomodoro_break_duration", 
+            type=int, 
+            metavar="minutos",
+            help="La duración del receso luego de cada pomodoro.")
+    config_parser.add_argument(
             "-finish_audio",
             type=str, 
             metavar="timer_audio",
@@ -221,6 +271,11 @@ def build_parser():
             type=str,
             metavar="pomodoro_audio",
             help="El audio que será reproducido al finalizar cada pomodoro. Debe ser un path absoluto al archivo.")
+    config_parser.add_argument(
+            "-break_finish_audio", 
+            type=str,
+            metavar="finish_break_audio",
+            help="El audio que será reproducido al finalizar cada descanso post pomodoro. Debe ser un path absoluto al archivo.")
     config_parser.add_argument(
             "-log_file", 
             type=str, 
@@ -242,6 +297,9 @@ def process_config(args, file="config.ini"):
     if args.pomodoro_time:
         config_object[env]["pomodoro_time"] = str(args.pomodoro_time)
 
+    if args.pomodoro_break_duration:
+        config_object[env]["pomodoro_break_duration"] = str(args.pomodoro_break_duration)
+
     if args.finish_audio:
         new_path = copy_file_to_local_data(args.finish_audio, name_in_environment("finish_audio", env))
         config_object[env]["path_pc"] = new_path
@@ -249,6 +307,10 @@ def process_config(args, file="config.ini"):
     if args.intermediate_audio:
         new_path = copy_file_to_local_data(args.intermediate_audio, name_in_environment("intermediate_audio", env))
         config_object[env]["between_pomodoros_sound"] = new_path
+
+    if args.break_finish_audio:
+        new_path = copy_file_to_local_data(args.break_finish_audio, name_in_environment("break_finish_audio", env))
+        config_object[env]["audio_pomodoro_break_finish"] = new_path
 
     if args.log_file:
         config_object[env]["path_to_log"] = args.log_file
@@ -286,16 +348,20 @@ def build_config(config_map):
 
     return Config(
             pomodoro_time= int(config_map["pomodoro_time"]),
+            pomodoro_break_duration= int(config_map["pomodoro_break_duration"]),
             path_pc= config_map["path_pc"],
             between_pomodoros_sound= config_map["between_pomodoros_sound"],
+            audio_pomodoro_break_finish= config_map["audio_pomodoro_break_finish"],
             path_to_log= config_map["path_to_log"]
             )
 
 @dc.dataclass(frozen=True)
 class Config:
     pomodoro_time : int
+    pomodoro_break_duration : int
     path_pc : str
     between_pomodoros_sound : str
+    audio_pomodoro_break_finish : str
     path_to_log : str
 
 if __name__ == "__main__":
