@@ -19,8 +19,6 @@ from utils import path_to_file, file_path_in_home, file_path_env_agnostic, file_
 from messages import *
 from global_data import TEMPORARY_PATH, CONFIGURATION_PATH
 
-##### main - keyboard manager #####
-
 def main():
     logging.basicConfig(
             level=logging.INFO,
