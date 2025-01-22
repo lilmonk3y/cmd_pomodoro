@@ -1,14 +1,6 @@
 from enum import StrEnum, auto
 from dataclasses import dataclass
 
-@dataclass(frozen=True)
-class Msg:
-    kind : str# kind : MsgType
-    msg : str
-
-    def __str__(self):
-        return "kind: {}, msg: {}".format(self.kind, self.msg)
-
 class MsgType(StrEnum):
     Time = auto()
     App = auto()
@@ -16,6 +8,14 @@ class MsgType(StrEnum):
     Termination = auto()
     Event = auto()
     Empty = auto()
+
+@dataclass(frozen=True)
+class Msg():
+    kind : MsgType
+    msg : str
+
+    def __str__(self):
+        return "kind: {}, msg: {}".format(self.kind, self.msg)
 
 class Event(StrEnum):
     AudioPlayback = auto()
@@ -25,6 +25,8 @@ class Event(StrEnum):
     PomodoroBegin = auto()
     BreakBegin = auto()
     BreakFinished = auto()
+    PomodoroInit = auto()
+    TimerInit = auto()
 
 def print_time(msg_queue, time):
     _send(msg_queue, Msg(MsgType.Time, time))
@@ -49,6 +51,12 @@ def event_stopped(msg_queue):
 
 def event_resumed(msg_queue):
     _send(msg_queue, Msg(MsgType.Event, Event.Resumed))
+
+def event_timer_init(msg_queue):
+    _send(msg_queue, Msg(MsgType.Event, Event.TimerInit))
+
+def event_pomodoro_init(msg_queue):
+    _send(msg_queue, Msg(MsgType.Event, Event.PomodoroInit))
 
 def event_pomodoro_begin(msg_queue):
     _send(msg_queue, Msg(MsgType.Event, Event.PomodoroBegin))

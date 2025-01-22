@@ -70,6 +70,7 @@ class Main:
 
     def _start_timer(self):
         if self._args.cmd == "timer":
+            event_timer_init(self._msg_queue)
             self._can_pause = True
             timer_process = multiprocessing.Process(
                     target=timer, 
@@ -82,6 +83,7 @@ class Main:
                         self._msg_queue))
 
         elif self._args.cmd == "pomodoro":
+            event_pomodoro_init(self._msg_queue)
             self._can_pause = False
             timer_process = multiprocessing.Process(
                     target=pomodoro,

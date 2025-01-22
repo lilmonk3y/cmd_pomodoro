@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
 
-from messages import MsgType, Msg, Event
+from messages import MsgType, Event
 
 def printer(msg_queue):
     curses.wrapper(printer_display, msg_queue)
@@ -41,29 +41,6 @@ def printer_display(stdscr, msg_queue):
     command_input_win = curses.newwin(command_input_height, command_input_width, timer_height, manual_width)
     app_messages_win = curses.newwin(app_messages_height, app_messages_width, timer_height + command_input_height, manual_width)
 
-    # Dibujar bordes y etiquetas iniciales
-    manual_win.box()
-    manual_win.addstr(0, 2, " Manual ")
-
-    timer_win.box()
-    timer_win.addstr(0, 2, " Tiempo para finalizar ")
-
-    command_input_win.box()
-    command_input_win.addstr(0, 2, " Comandos tipeados ")
-
-    app_messages_win.box()
-    app_messages_win.addstr(0, 2, " Mensajes de la aplicación ")
-
-    # Refrescar ventanas
-    timer_win.refresh()
-
-    for index, line in enumerate(list(filter(None,app_manual().splitlines()))):
-        manual_win.addstr(index+2, 1, line)
-    manual_win.refresh()
-
-    command_input_win.refresh()
-    app_messages_win.refresh()
-
     init_state = {"time":"","app":[],"cmd":"","mode":Modes.Running} # TODO create State class
     (Printer(
         CommandInputWindow(
@@ -80,7 +57,11 @@ def printer_display(stdscr, msg_queue):
             window=timer_win,
             width=timer_width,
             height=timer_height
-            )
+            ),
+        ManualWindow(
+            window=manual_win,
+            width=manual_width,
+            height=manual_height)
         )).run( 
                state = init_state, 
                msg_queue=msg_queue
@@ -98,12 +79,19 @@ class Printer:
         self._last_state_refreshed = dict(state)
         last_state = dict(state)
 
+        self._draw_windows()
+
         while True and not self._must_finish:
             new_state = self._process_new_msgs(msg_queue, last_state)
 
             self._refresh_if_have_to(new_state)
 
             last_state = dict(new_state)
+
+    def _draw_windows(self):
+        for window in self._windows:
+            window.draw()
+            window.refresh(self._last_state_refreshed)
 
     def _process_new_msgs(self, msg_queue, last_state):
         state = dict(last_state)
@@ -164,6 +152,12 @@ class Printer:
                     case Event.BreakFinished:
                         state["mode"] = Modes.BreakFinish
 
+                    case Event.TimerInit:
+                        state["mode"] = Modes.TimerInit
+
+                    case Event.PomodoroInit:
+                        state["mode"] = Modes.PomodoroInit
+
                     case _:
                         raise RuntimeError("Event {} unhandled".format(msg.msg))
 
@@ -187,13 +181,13 @@ class Window:
         self.width = width
         self.height = height
 
-    def process(self, last_state, state):
+    def process(self, old_state, new_state) -> None:
         raise RuntimeError("Shouldn't be used")
 
-    def refresh(self, state):
+    def refresh(self, state) -> None:
         raise RuntimeError("Shouldn't be used")
 
-    def _refresh(self):
+    def _refresh(self) -> None:
         self.window.refresh()
 
 class TimerWindow(Window):
@@ -210,27 +204,27 @@ class TimerWindow(Window):
 
         self._color = None
 
-    def process(self, last_state, state):
-        if last_state["mode"] != state["mode"]:
-            if state["mode"] == Modes.Stopped:
+    def draw(self):
+        self._draw_default_layout()
+
+    def process(self, old_state, new_state):
+        if old_state["mode"] != new_state["mode"]:
+            if new_state["mode"] == Modes.Stopped:
                 self._text_effect = BlinkTextEffect()
 
-            elif state["mode"] == Modes.AudioPlayback:
+            elif new_state["mode"] == Modes.AudioPlayback:
                 self._text_effect = SlideTextEffect()
 
-            elif state["mode"] == Modes.Running:
+            elif new_state["mode"] == Modes.Running:
                 self._text_effect = NoneTextEffect()
 
-            elif state["mode"] == Modes.OnBreak:
+            elif new_state["mode"] == Modes.OnBreak:
                 self._start_color()
                 self._draw_on_break()
 
-            elif state["mode"] == Modes.BreakFinish:
+            elif new_state["mode"] == Modes.BreakFinish:
                 self._shutdown_color()
                 self._draw_default_layout()
-
-            else:
-                raise RuntimeError("Mode {} is unhandled".format(state["mode"]))
         
     def refresh(self, state):
         if self._text_effect.empty():
@@ -271,7 +265,11 @@ class TimerWindow(Window):
         return " : ".join(numbers_splited)
 
 class AppMessagesWindow(Window):
-    def process(self, old_state, new_state):
+    def draw(self):
+        self.window.box()
+        self.window.addstr(0, 2, " Mensajes de la aplicación ")
+
+    def process(self, old_state, new_state) -> None:
         pass
 
     def refresh(self, state):
@@ -282,6 +280,10 @@ class AppMessagesWindow(Window):
         self._refresh()
 
 class CommandInputWindow(Window):
+    def draw(self):
+        self.window.box()
+        self.window.addstr(0, 2, " Comandos tipeados ")
+
     def process(self, old_state, new_state):
         pass
 
@@ -290,17 +292,62 @@ class CommandInputWindow(Window):
 
         self._refresh()
 
+class ManualWindow(Window):
+    def __init__(self, window, width, height):
+        super().__init__(window=window, width=width, height=height)
+        self._manual = self._timer_manual()
+
+    def draw(self):
+        self.window.box()
+        self.window.addstr(0, 2, " Manual ")
+
+    def process(self, old_state, new_state):
+        if new_state["mode"] == Modes.TimerInit:
+            self._manual = self._timer_manual()
+        elif new_state["mode"] == Modes.PomodoroInit:
+            self._manual = self._pomodoro_manual()
+
+        self.window.clear()
+        self.draw()
+
+    def refresh(self, state):
+        for index, line in enumerate(list(filter(None,self._manual.splitlines()))):
+            self.window.addstr(index+2, 1, line)
+        self.window.refresh()
+
+        self._refresh()
+
+    def _timer_manual(self):
+        manual = """
+        Las opciones de teclas son:
+        p   Pausar el temporizador
+        c   Continuar con el temporizador
+        f   Finalizar el temporizador
+        t   Iniciar/detener un stopwatch
+        s   Detener la reproducción del sonido de finalización del timer
+        """
+        return manual
+
+    def _pomodoro_manual(self):
+        manual = """
+        Las opciones de teclas son:
+        f   Finalizar el temporizador
+        t   Iniciar/detener un stopwatch
+        s   Detener la reproducción del sonido de finalización del timer
+        """
+        return manual
+
 class TextEffect(ABC):
     @abstractmethod
-    def empty(self):
+    def empty(self) -> bool:
         pass
 
     @abstractmethod
-    def refill(self):
+    def refill(self) -> None:
         pass
 
     @abstractmethod
-    def render(self, timer_render_obj):
+    def render(self, timer_render_obj) -> None:
         pass
 
 class NoneTextEffect(TextEffect):
@@ -413,15 +460,6 @@ class Modes(StrEnum):
     AudioPlayback = auto()
     OnBreak = auto()
     BreakFinish = auto()
-
-def app_manual():
-    manual = """
-    Las opciones de teclas son:
-    p   Pausar el temporizador
-    c   Continuar con el temporizador
-    f   Finalizar el temporizador
-    t   Iniciar un stopwatch
-    s   Detener la reproducción del sonido de finalización del timer
-    """
-    return manual
+    TimerInit = auto()
+    PomodoroInit = auto()
 
