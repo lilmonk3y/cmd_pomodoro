@@ -13,11 +13,11 @@ import logging
 
 from printer import printer
 from stopwatch import stopwatch as stopwatch_process
-from timer import timer
+from timer import timer, pomodoro
 from process_audio import audio_process, audio_process_short
 from utils import path_to_file, file_path_in_home, file_path_env_agnostic, file_path
 from messages import *
-from global_data import TEMPORARY_PATH, CONFIGURATION_PATH
+from global_data import TEMPORARY_PATH, CONFIGURATION_PATH, DATA_PATH
 
 def main():
     logging.basicConfig(
@@ -41,7 +41,7 @@ def main():
     main_pipe, timer_pipe = multiprocessing.Pipe()
     timer_process = None
     can_pause = True
-    if config.cmd == "timer":
+    if args.cmd == "timer":
         timer_process = multiprocessing.Process(
                 target=timer, 
                 args=(
@@ -52,7 +52,7 @@ def main():
                     config.pomodoro_time, 
                     msg_queue))
 
-    elif config.cmd == "pomodoro":
+    elif args.cmd == "pomodoro":
         timer_process = multiprocessing.Process(
                 target=pomodoro,
                 args=(timer_pipe,
@@ -61,8 +61,7 @@ def main():
                       config.pomodoro_time,
                       config.pomodoro_break_duration,
                       config.path_to_log,
-                      msg_queue))
-                )
+                      msg_queue)) 
         can_pause = False
     else:
         raise RuntimeError("Comando {} desconocido")
@@ -95,7 +94,7 @@ def main():
 
             elif msg == "audio_break_ended":
                 event_playback(msg_queue)
-                (multiprocessing.Process(target=audio_process_short, args=(args, config.audio_pomodoro_finished, msg_queue))).start()
+                (multiprocessing.Process(target=audio_process_short, args=(args, config.audio_pomodoro_break_finish, msg_queue))).start()
 
             else:
                 raise RuntimeError(f"Message {msg} is unhandled by main process")
@@ -186,7 +185,11 @@ def publish_notification(msgs):
     subprocess.run(["notify-send", *msgs, "-a", "cmd_pomodoro", "-t", "60"])
 
 def finished_info_msg(args):
-    summary_msg = "Finalizó el temporizador de {} minutos".format(args.minutes_count)
+    if args.cmd == "timer":
+        summary_msg = "Finalizó el temporizador de {} minutos".format(args.minutes_count)
+    else:
+        summary_msg = "Finalizaron los {} pomodoros".format(args.pomodoros)
+
     if args.tag:
         summary_msg += " para la tarea {}.".format(args.tag)
     else:
@@ -230,17 +233,20 @@ def build_parser():
     timer_parser.add_argument(
             "minutes_count", 
             type=int, 
+            default=None,
             help="Cantidad de minutos que debe durar el temporizador. Este es el primer argumento posicional")
     timer_parser.add_argument(
             "-tag", "-t", 
             type=str, 
+            default=None,
             help="Tarea en la que se dedicó el tiempo del pomodoro.")
 
     # pomodoro command
     pomodoro_parser = subparser.add_parser("pomodoro", help="Comienza tantos pomodoros como se pase por argumento.")
     pomodoro_parser.add_argument(
-            "amount_of_pomodoros", 
+            "pomodoros", 
             type=int, 
+            metavar="amount_of_pomodoros",
             help="Cantidad de pomodoros que se quiere realizar. Al final de cada intervalo habrá un periodo de descanso.")
     pomodoro_parser.add_argument(
             "-tag", "-t", 

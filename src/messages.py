@@ -22,6 +22,9 @@ class Event(StrEnum):
     AudioStopped = auto()
     Stopped = auto()
     Resumed = auto()
+    PomodoroBegin = auto()
+    BreakBegin = auto()
+    BreakFinished = auto()
 
 def print_time(msg_queue, time):
     _send(msg_queue, Msg(MsgType.Time, time))
@@ -46,6 +49,15 @@ def event_stopped(msg_queue):
 
 def event_resumed(msg_queue):
     _send(msg_queue, Msg(MsgType.Event, Event.Resumed))
+
+def event_pomodoro_begin(msg_queue):
+    _send(msg_queue, Msg(MsgType.Event, Event.PomodoroBegin))
+
+def event_break_begin(msg_queue):
+    _send(msg_queue, Msg(MsgType.Event, Event.BreakBegin))
+
+def event_break_finished(msg_queue):
+    _send(msg_queue, Msg(MsgType.Event, Event.BreakFinished))
 
 def _send(msg_queue, msg): # msg : Msg
     msg_queue.put(msg)

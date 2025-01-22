@@ -1,7 +1,7 @@
 from datetime import datetime
 import time
 
-from messages import print_time, print_app_msg, event_pomodoro_begin, event_break_begin
+from messages import print_time, print_app_msg, event_pomodoro_begin, event_break_begin, event_break_finished
 from utils import path_to_file
 
 def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time, msg_queue):
@@ -15,11 +15,11 @@ def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time, msg_queue):
            tag=tag)).run()
 
 def pomodoro(pipe, pomodoros, tag, pomodoro_time, pomodoro_break_duration, path_to_log, msg_queue):
-    (Pomodoro(minutes_count=pomodoro_time*pomodoros,
+    (Pomodoro(pomodoros=pomodoros,
            pipe=pipe,
            msg_queue=msg_queue,
            pomodoro_time=pomodoro_time,
-           log_file=log_file,
+           log_file=path_to_log,
            tag=tag,
            pomodoro_break_duration=pomodoro_break_duration)).run()
 
@@ -63,14 +63,12 @@ class Pomodoro:
                 self._pomodoros -= 1
 
                 if self._pomodoros != 0: 
-                    self._pipe.send("audio_pomodoro_finished")
                     self._set_break()
-                    event_break_begin(self._msg_queue)
 
             elif self._is_break_ended():
+                event_break_finished(self._msg_queue)
                 self._pipe.send("audio_break_ended")
                 self._set_pomodoro()
-                event_pomodoro_begin(self._msg_queue)
 
             time.sleep(1)
             self._seconds -= 1
@@ -80,10 +78,13 @@ class Pomodoro:
     def _set_pomodoro(self):
         self._on_break = False
         self._seconds = self._pomodoro_time * 60
+        event_pomodoro_begin(self._msg_queue)
         
     def _set_break(self):
         self._on_break = True
         self._seconds = self._pomodoro_break_duration * 60
+        self._pipe.send("audio_pomodoro_finished")
+        event_break_begin(self._msg_queue)
 
     def _poll_pipe(self):
         if self._pipe.poll():

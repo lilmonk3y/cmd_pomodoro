@@ -18,6 +18,8 @@ def printer_display(stdscr, msg_queue):
     # Configurar curses
     curses.curs_set(0)  # Ocultar el cursor
     stdscr.clear()
+    curses.start_color()
+    curses.init_pair(1, curses.COLOR_GREEN, curses.COLOR_BLACK)
 
     # Obtener tamaño de la pantalla
     height, width = stdscr.getmaxyx()
@@ -84,76 +86,6 @@ def printer_display(stdscr, msg_queue):
                msg_queue=msg_queue
                )
 
-class Window:
-    def __init__(self, window, width, height):
-        self.window = window
-        self.width = width
-        self.height = height
-
-    def refresh(self, last_state, state):
-        raise RuntimeError("Shouldn't be used")
-
-    def _refresh(self):
-        self.window.refresh()
-
-class TimerWindow(Window):
-    def __init__(self,window, width, height):
-        super().__init__(window, width, height)
-
-        self._text_effect = NoneTextEffect()
-        self._figlet = Figlet(font="standard")
-
-        self._start_y = height // 3 + 2
-        self._start_x = width // 3 + 7
-
-        self._logger = logging.getLogger(".timer_window")
-
-    def refresh(self, last_state, state):
-        if last_state["mode"] != state["mode"]:
-            if state["mode"] == Modes.Stopped:
-                self._text_effect = BlinkTextEffect()
-
-            elif state["mode"] == Modes.AudioPlayback:
-                self._text_effect = SlideTextEffect()
-
-            elif state["mode"] == Modes.Running:
-                self._text_effect = NoneTextEffect()
-
-            else:
-                raise RuntimeError("Mode {} is unhandled".format(state["mode"]))
-
-        else:
-            if self._text_effect.empty():
-                self._text_effect.refill()
-        
-        self._text_effect.render(TimerRenderInput(
-            window=self.window, 
-            window_width=self.width, 
-            start_y=self._start_y, 
-            start_x=self._start_x, 
-            figlet_render=self._figlet, 
-            time_str=self._figlet_readable_str(state["time"])))
-
-        self._refresh()
-
-    def _figlet_readable_str(self, time_str):
-        numbers_splited = time_str.split(":")
-        return " : ".join(numbers_splited)
-
-class AppMessagesWindow(Window):
-    def refresh(self, _, state):
-        for index, msg in enumerate(list(reversed(state["app"]))[:self.height-2]):
-            self.window.addstr(index+1,1," " * (self.width - 2))  # Limpiar la línea
-            self.window.addstr(index+1,1,msg)
-
-        self._refresh()
-
-class CommandInputWindow(Window):
-    def refresh(self, _, state):
-        self.window.addstr(1, 1, "Último comando presionado: {}".format(state["cmd"]))
-
-        self._refresh()
-
 class Printer:
     def __init__(self, *windows):
         self._windows = windows
@@ -185,14 +117,20 @@ class Printer:
             
             state = self._curr_state(msg, state)
 
+            self._windows_process(state)
+
         return state
+
+    def _windows_process(self, state):
+        for window in self._windows:
+            window.process(self._last_state_refreshed, state)
 
     def _refresh_if_have_to(self, state):
         if not self._time_is_up():
             return
         
         for window in self._windows:
-            window.refresh(self._last_state_refreshed, state)
+            window.refresh( state)
 
         self._last_state_refreshed = dict(state)
         self._set_next_update()
@@ -217,8 +155,14 @@ class Printer:
                     case Event.Stopped:
                         state["mode"] = Modes.Stopped
 
-                    case Event.AudioStopped | Event.Resumed:
+                    case Event.AudioStopped | Event.Resumed | Event.PomodoroBegin:
                         state["mode"] = Modes.Running
+                    
+                    case Event.BreakBegin:
+                        state["mode"] = Modes.OnBreak
+
+                    case Event.BreakFinished:
+                        state["mode"] = Modes.BreakFinish
 
                     case _:
                         raise RuntimeError("Event {} unhandled".format(msg.msg))
@@ -236,6 +180,115 @@ class Printer:
 
     def _set_next_update(self):
         self._must_update = datetime.now() + timedelta(seconds=0.5)
+
+class Window:
+    def __init__(self, window, width, height):
+        self.window = window
+        self.width = width
+        self.height = height
+
+    def process(self, last_state, state):
+        raise RuntimeError("Shouldn't be used")
+
+    def refresh(self, state):
+        raise RuntimeError("Shouldn't be used")
+
+    def _refresh(self):
+        self.window.refresh()
+
+class TimerWindow(Window):
+    def __init__(self,window, width, height):
+        super().__init__(window, width, height)
+
+        self._text_effect = NoneTextEffect()
+        self._figlet = Figlet(font="standard")
+
+        self._start_y = height // 3 + 2
+        self._start_x = width // 3 + 7
+
+        self._logger = logging.getLogger(".timer_window")
+
+        self._color = None
+
+    def process(self, last_state, state):
+        if last_state["mode"] != state["mode"]:
+            if state["mode"] == Modes.Stopped:
+                self._text_effect = BlinkTextEffect()
+
+            elif state["mode"] == Modes.AudioPlayback:
+                self._text_effect = SlideTextEffect()
+
+            elif state["mode"] == Modes.Running:
+                self._text_effect = NoneTextEffect()
+
+            elif state["mode"] == Modes.OnBreak:
+                self._start_color()
+                self._draw_on_break()
+
+            elif state["mode"] == Modes.BreakFinish:
+                self._shutdown_color()
+                self._draw_default_layout()
+
+            else:
+                raise RuntimeError("Mode {} is unhandled".format(state["mode"]))
+        
+    def refresh(self, state):
+        if self._text_effect.empty():
+            self._text_effect.refill()
+
+        self._text_effect.render(TimerRenderInput(
+            window=self, 
+            window_width=self.width, 
+            start_y=self._start_y, 
+            start_x=self._start_x, 
+            figlet_render=self._figlet, 
+            time_str=self._figlet_readable_str(state["time"])))
+
+        self._refresh()
+
+    def addstr(self, y, x, text):
+        if curses.has_colors() and self._color:
+            self.window.addstr(y,x,text,self._color)
+        else:
+            self.window.addstr(y,x,text)
+
+    def _draw_on_break(self):
+        self.window.box()
+        self.addstr(0, 2, " En descanso ")
+
+    def _draw_default_layout(self):
+        self.window.box()
+        self.addstr(0, 2, " Tiempo para finalizar ")
+
+    def _start_color(self):
+        self._color = curses.color_pair(1) # green color
+
+    def _shutdown_color(self):
+        self._color = None
+
+    def _figlet_readable_str(self, time_str):
+        numbers_splited = time_str.split(":")
+        return " : ".join(numbers_splited)
+
+class AppMessagesWindow(Window):
+    def process(self, old_state, new_state):
+        pass
+
+    def refresh(self, state):
+        for index, msg in enumerate(list(reversed(state["app"]))[:self.height-2]):
+            self.window.addstr(index+1,1," " * (self.width - 2))  # Limpiar la línea
+            self.window.addstr(index+1,1,msg)
+
+        self._refresh()
+
+class CommandInputWindow(Window):
+    def process(self, old_state, new_state):
+        pass
+
+    def refresh(self, state):
+        self.window.addstr(1, 1, "Último comando presionado: {}".format(state["cmd"]))
+
+        self._refresh()
 
 class TextEffect(ABC):
     @abstractmethod
@@ -358,6 +411,8 @@ class Modes(StrEnum):
     Running = auto()
     Stopped = auto()
     AudioPlayback = auto()
+    OnBreak = auto()
+    BreakFinish = auto()
 
 def app_manual():
     manual = """
