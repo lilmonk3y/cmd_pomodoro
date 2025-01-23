@@ -13,8 +13,6 @@ def printer(msg_queue):
     curses.wrapper(printer_display, msg_queue)
 
 def printer_display(stdscr, msg_queue):
-    logger = logging.getLogger(".printer")
-
     # Configurar curses
     curses.curs_set(0)  # Ocultar el cursor
     stdscr.clear()
@@ -24,7 +22,14 @@ def printer_display(stdscr, msg_queue):
     # Obtener tamaño de la pantalla
     height, width = stdscr.getmaxyx()
 
-    # Calcular dimensiones de las ventanas
+
+    init_state = {"time":"","app":[],"cmd":"","mode":Modes.Running} # TODO create State class
+    (Screen(
+        build_main_layout(height,width),
+        build_input_layout(height,width)
+     )).run( state = init_state, msg_queue=msg_queue)
+
+def build_main_layout(height,width):
     timer_height = height // 2
     command_input_height = 3
     manual_height = timer_height
@@ -35,51 +40,53 @@ def printer_display(stdscr, msg_queue):
     command_input_width = manual_width
     app_messages_width = manual_width
 
-    # Crear ventanas
-    timer_win = curses.newwin(timer_height, timer_width, 0, 0)
-    manual_win = curses.newwin(manual_height, manual_width, timer_height, 0)
-    command_input_win = curses.newwin(command_input_height, command_input_width, timer_height, manual_width)
-    app_messages_win = curses.newwin(app_messages_height, app_messages_width, timer_height + command_input_height, manual_width)
+    return Layout(
+            CommandInputTile(
+                window=curses.newwin(command_input_height, command_input_width, timer_height, manual_width),
+                width=command_input_width,
+                height=command_input_height
+                ),
+            AppMessagesTile(
+                window=curses.newwin(app_messages_height, app_messages_width, timer_height + command_input_height, manual_width),
+                width=app_messages_width,
+                height=app_messages_height
+                ),
+            TimerTile(
+                window=curses.newwin(timer_height, timer_width, 0, 0),
+                width=timer_width,
+                height=timer_height
+                ),
+            ManualTile(
+                window=curses.newwin(manual_height, manual_width, timer_height, 0),
+                width=manual_width,
+                height=manual_height))
 
-    init_state = {"time":"","app":[],"cmd":"","mode":Modes.Running} # TODO create State class
-    (Printer(
-        CommandInputWindow(
-            window=command_input_win,
-            width=command_input_width,
-            height=command_input_height
-            ),
-        AppMessagesWindow(
-            window=app_messages_win,
-            width=app_messages_width,
-            height=app_messages_height
-            ),
-        TimerWindow(
-            window=timer_win,
-            width=timer_width,
-            height=timer_height
-            ),
-        ManualWindow(
-            window=manual_win,
-            width=manual_width,
-            height=manual_height)
-        )).run( 
-               state = init_state, 
-               msg_queue=msg_queue
-               )
+def build_input_layout(height, width):
+    height = height - 30
+    width = width - 30
+    
+    window = curses.newwin(height, width, 0, 0)
 
-class Printer:
-    def __init__(self, *windows):
-        self._windows = windows
+    return Layout(
+            InputTile(
+                window=window,
+                width= width,
+                height=height))
+
+class Screen:
+    def __init__(self, *layouts):
+        self._layouts = layouts
         self._must_update = datetime.now()
         self._must_finish = False
-        self._logger = logging.getLogger(".printer")
         self._last_state_refreshed = None
+
+        self._logger = logging.getLogger(".printer")
 
     def run(self, state, msg_queue):
         self._last_state_refreshed = dict(state)
         last_state = dict(state)
 
-        self._draw_windows()
+        self._draw_layout()
 
         while True and not self._must_finish:
             new_state = self._process_new_msgs(msg_queue, last_state)
@@ -88,10 +95,10 @@ class Printer:
 
             last_state = dict(new_state)
 
-    def _draw_windows(self):
-        for window in self._windows:
-            window.draw()
-            window.refresh(self._last_state_refreshed)
+    def _draw_layout(self):
+        for layout in self._layouts:
+            layout.draw()
+            layout.refresh(self._last_state_refreshed)
 
     def _process_new_msgs(self, msg_queue, last_state):
         state = dict(last_state)
@@ -105,20 +112,20 @@ class Printer:
             
             state = self._curr_state(msg, state)
 
-            self._windows_process(state)
+            self._layouts_process(state)
 
         return state
 
-    def _windows_process(self, state):
-        for window in self._windows:
-            window.process(self._last_state_refreshed, state)
+    def _layouts_process(self, state):
+        for layout in self._layouts:
+            layout.process(self._last_state_refreshed, state)
 
     def _refresh_if_have_to(self, state):
         if not self._time_is_up():
             return
         
-        for window in self._windows:
-            window.refresh( state)
+        for layout in self._layouts:
+            layout.refresh(state)
 
         self._last_state_refreshed = dict(state)
         self._set_next_update()
@@ -175,22 +182,47 @@ class Printer:
     def _set_next_update(self):
         self._must_update = datetime.now() + timedelta(seconds=0.5)
 
-class Window:
+class Layout:
+    def __init__(self, *tiles): #: [Tile]
+        self._tiles = tiles
+
+    def draw(self):
+        self._tiles_do(lambda window: 
+            window.draw())
+
+    def refresh(self, state):
+        self._tiles_do(lambda window: 
+            window.refresh(state))
+
+    def process(self,old_state, new_state):
+        self._tiles_do(lambda window: 
+            window.process(old_state,new_state))
+
+    def _tiles_do(self, func):
+        for tile in self._tiles:
+            func(tile)
+
+class Tile(ABC):
     def __init__(self, window, width, height):
         self.window = window
         self.width = width
         self.height = height
 
+    @abstractmethod
     def process(self, old_state, new_state) -> None:
         raise RuntimeError("Shouldn't be used")
 
+    @abstractmethod
     def refresh(self, state) -> None:
+        raise RuntimeError("Shouldn't be used")
+
+    def draw(self) -> None:
         raise RuntimeError("Shouldn't be used")
 
     def _refresh(self) -> None:
         self.window.refresh()
 
-class TimerWindow(Window):
+class TimerTile(Tile):
     def __init__(self,window, width, height):
         super().__init__(window, width, height)
 
@@ -264,7 +296,7 @@ class TimerWindow(Window):
         numbers_splited = time_str.split(":")
         return " : ".join(numbers_splited)
 
-class AppMessagesWindow(Window):
+class AppMessagesTile(Tile):
     def draw(self):
         self.window.box()
         self.window.addstr(0, 2, " Mensajes de la aplicación ")
@@ -279,7 +311,7 @@ class AppMessagesWindow(Window):
 
         self._refresh()
 
-class CommandInputWindow(Window):
+class CommandInputTile(Tile):
     def draw(self):
         self.window.box()
         self.window.addstr(0, 2, " Comandos tipeados ")
@@ -292,7 +324,7 @@ class CommandInputWindow(Window):
 
         self._refresh()
 
-class ManualWindow(Window):
+class ManualTile(Tile):
     def __init__(self, window, width, height):
         super().__init__(window=window, width=width, height=height)
         self._manual = self._timer_manual()
@@ -308,7 +340,6 @@ class ManualWindow(Window):
             self._manual = self._pomodoro_manual()
 
         self.window.clear()
-        self.draw()
 
     def refresh(self, state):
         for index, line in enumerate(list(filter(None,self._manual.splitlines()))):
@@ -336,6 +367,31 @@ class ManualWindow(Window):
         s   Detener la reproducción del sonido de finalización del timer
         """
         return manual
+
+class InputTile(Tile):
+    def __init__(self, window, width , height):
+        super().__init__(window,width,height)
+
+        self._show = False
+
+    def process(self, old_state, new_state):
+        if new_state["mode"] == Modes.InputPurpose:
+            self._show = True
+        elif new_state["mode"] == Modes.ClosePurpose:
+            self._show = False
+
+    def refresh(self, state):
+        if self._show:
+            msg = "¿Cuál es el objetivo de este pomodoro?" 
+            self.window.border()
+            self.window.addstr(0,0, msg)
+            purpose = self.window.getstr(0,0,self.width-len(msg)).decode("utf-8")
+            raise RuntimeError("Not implemented")
+
+
+
+    def draw(self):
+        pass
 
 class TextEffect(ABC):
     @abstractmethod

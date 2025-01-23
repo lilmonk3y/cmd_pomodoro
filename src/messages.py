@@ -1,5 +1,7 @@
+from abc import abstractmethod, ABC
 from enum import StrEnum, auto
 from dataclasses import dataclass
+from multiprocessing import Queue
 
 class MsgType(StrEnum):
     Time = auto()
@@ -27,6 +29,40 @@ class Event(StrEnum):
     BreakFinished = auto()
     PomodoroInit = auto()
     TimerInit = auto()
+
+class Consumer(ABC):
+    @abstractmethod
+    def consume(self, event: Event):
+        raise RuntimeError("Shouldn't be used")
+
+class EventBroker:
+    def __init__(self):
+        self._msg_queue = Queue()
+        self._event_consumers = self._init_event_dict()
+
+    def suscribe(self, consumer: Consumer, *events):
+        for event in events:
+            if event in self._event_consumers.keys():
+                self._event_consumers[event].append(consumer)
+            else:
+                raise RuntimeError("Event {} is not a valid event".format(event))
+
+    def publish(self, msg: Msg):
+        assert msg.kind == MsgType.Event
+        
+        event = msg.msg
+        for consumer in self._event_consumers[event]:
+            consumer.consume(event)
+
+
+    def _init_event_dict(self):
+        event_consumers = dict()
+        for event in Event:
+            event_consumers[event] = []
+
+        return event_consumers
+
+
 
 def print_time(msg_queue, time):
     _send(msg_queue, Msg(MsgType.Time, time))
@@ -68,4 +104,4 @@ def event_break_finished(msg_queue):
     _send(msg_queue, Msg(MsgType.Event, Event.BreakFinished))
 
 def _send(msg_queue, msg): # msg : Msg
-    msg_queue.put(msg)
+    msg_queue.publish(msg)

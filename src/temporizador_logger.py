@@ -34,9 +34,12 @@ class Main:
         self._config = config
 
         self._can_pause = None
-        self._msg_queue = multiprocessing.Queue()
+        self._msg_queue = EventBroker()
         self._pipe_timer, self._pipe_timer_process = multiprocessing.Pipe()
 
+        raise RuntimeError("""
+            Implementar el uso del EventBroker en el timer y el printer. Hacer que los objetos 
+            se susbriban a los eventos que necesiten """)
         self._timer_process = self._start_timer()
         self._start_printer()
 
