@@ -1,13 +1,12 @@
 from abc import abstractmethod, ABC
 from typing import Any
 from pyfiglet import Figlet
-from enum import StrEnum, auto
 import curses
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
 
-from messages import MsgType, Event
+from messages import EventMsg, Event, event_printer_ready
 
 def printer(msg_queue):
     curses.wrapper(printer_display, msg_queue)
@@ -22,12 +21,11 @@ def printer_display(stdscr, msg_queue):
     # Obtener tamaño de la pantalla
     height, width = stdscr.getmaxyx()
 
-
-    init_state = {"time":"","app":[],"cmd":"","mode":Modes.Running} # TODO create State class
     (Screen(
         build_main_layout(height,width),
-        build_input_layout(height,width)
-     )).run( state = init_state, msg_queue=msg_queue)
+        build_input_layout(height,width),
+        msg_queue=msg_queue
+     )).run()
 
 def build_main_layout(height,width):
     timer_height = height // 2
@@ -74,108 +72,51 @@ def build_input_layout(height, width):
                 height=height))
 
 class Screen:
-    def __init__(self, *layouts):
+    def __init__(self, *layouts,msg_queue):
+        self._msg_queue = msg_queue
         self._layouts = layouts
         self._must_update = datetime.now()
         self._must_finish = False
-        self._last_state_refreshed = None
 
+        self._msgs_pipe = self._msg_queue.suscribe( Event.TimeChange, Event.App,    Event.Cmd , Event.Termination, Event.AudioPlayback, Event.AudioStopped, Event.Stopped, Event.Resumed, Event.PomodoroBegin, Event. BreakBegin, Event.BreakFinished, Event.PomodoroInit, Event.TimerInit)
         self._logger = logging.getLogger(".printer")
 
-    def run(self, state, msg_queue):
-        self._last_state_refreshed = dict(state)
-        last_state = dict(state)
-
+    def run(self):
         self._draw_layout()
+        event_printer_ready(self._msg_queue)
 
-        while True and not self._must_finish:
-            new_state = self._process_new_msgs(msg_queue, last_state)
+        while not self._must_finish:
+            self._pool_for_msgs()
+            self._refresh_if_have_to()
 
-            self._refresh_if_have_to(new_state)
+    def _pool_for_msgs(self):
+        while self._msgs_pipe.poll():
+            msg = self._msgs_pipe.recv()
 
-            last_state = dict(new_state)
+            self._logger.info("Printer is consuming msg {}".format(msg))
+
+            if msg.kind == Event.Termination:
+                self._must_finish = True
+                return
+
+            for layout in self._layouts:
+                layout.process(msg)
+
 
     def _draw_layout(self):
         for layout in self._layouts:
             layout.draw()
-            layout.refresh(self._last_state_refreshed)
+            layout.refresh()
 
-    def _process_new_msgs(self, msg_queue, last_state):
-        state = dict(last_state)
-
-        while not msg_queue.empty():
-            msg = msg_queue.get()
-
-            if msg.kind == MsgType.Termination:
-                self._must_finish = True
-                return state
-            
-            state = self._curr_state(msg, state)
-
-            self._layouts_process(state)
-
-        return state
-
-    def _layouts_process(self, state):
-        for layout in self._layouts:
-            layout.process(self._last_state_refreshed, state)
-
-    def _refresh_if_have_to(self, state):
+    def _refresh_if_have_to(self):
         if not self._time_is_up():
             return
         
         for layout in self._layouts:
-            layout.refresh(state)
+            layout.refresh()
 
-        self._last_state_refreshed = dict(state)
         self._set_next_update()
 
-    def _curr_state(self, msg, last_state):
-        state = dict(last_state)
-        match msg.kind:
-            case MsgType.Time:
-                state["time"] = msg.msg
-
-            case MsgType.App:
-                state["app"].append(msg.msg)
-
-            case MsgType.Cmd:
-                state["cmd"] = msg.msg
-
-            case MsgType.Event:
-                match msg.msg:
-                    case Event.AudioPlayback:
-                        state["mode"] = Modes.AudioPlayback
-
-                    case Event.Stopped:
-                        state["mode"] = Modes.Stopped
-
-                    case Event.AudioStopped | Event.Resumed | Event.PomodoroBegin:
-                        state["mode"] = Modes.Running
-                    
-                    case Event.BreakBegin:
-                        state["mode"] = Modes.OnBreak
-
-                    case Event.BreakFinished:
-                        state["mode"] = Modes.BreakFinish
-
-                    case Event.TimerInit:
-                        state["mode"] = Modes.TimerInit
-
-                    case Event.PomodoroInit:
-                        state["mode"] = Modes.PomodoroInit
-
-                    case _:
-                        raise RuntimeError("Event {} unhandled".format(msg.msg))
-
-            case MsgType.Empty:
-                pass
-
-            case _:
-                raise RuntimeError("msg {} unhandled".format(msg))
-
-        return state
-    
     def _time_is_up(self):
         return self._must_update < datetime.now()
 
@@ -190,13 +131,13 @@ class Layout:
         self._tiles_do(lambda window: 
             window.draw())
 
-    def refresh(self, state):
+    def refresh(self):
         self._tiles_do(lambda window: 
-            window.refresh(state))
+            window.refresh())
 
-    def process(self,old_state, new_state):
+    def process(self, msg):
         self._tiles_do(lambda window: 
-            window.process(old_state,new_state))
+            window.process(msg))
 
     def _tiles_do(self, func):
         for tile in self._tiles:
@@ -209,13 +150,14 @@ class Tile(ABC):
         self.height = height
 
     @abstractmethod
-    def process(self, old_state, new_state) -> None:
+    def process(self, msg: EventMsg) -> None:
         raise RuntimeError("Shouldn't be used")
 
     @abstractmethod
-    def refresh(self, state) -> None:
+    def refresh(self) -> None:
         raise RuntimeError("Shouldn't be used")
 
+    @abstractmethod
     def draw(self) -> None:
         raise RuntimeError("Shouldn't be used")
 
@@ -223,7 +165,7 @@ class Tile(ABC):
         self.window.refresh()
 
 class TimerTile(Tile):
-    def __init__(self,window, width, height):
+    def __init__(self, window, width, height):
         super().__init__(window, width, height)
 
         self._text_effect = NoneTextEffect()
@@ -234,31 +176,38 @@ class TimerTile(Tile):
 
         self._logger = logging.getLogger(".timer_window")
 
+        self._time = ""
         self._color = None
 
     def draw(self):
         self._draw_default_layout()
 
-    def process(self, old_state, new_state):
-        if old_state["mode"] != new_state["mode"]:
-            if new_state["mode"] == Modes.Stopped:
+    def process(self, msg):
+        match msg.kind:
+            case Event.TimeChange:
+                self._time = msg.msg
+
+            case Event.Stopped:
                 self._text_effect = BlinkTextEffect()
 
-            elif new_state["mode"] == Modes.AudioPlayback:
+            case Event.AudioPlayback:
                 self._text_effect = SlideTextEffect()
 
-            elif new_state["mode"] == Modes.Running:
+            case Event.AudioStopped | Event.Resumed | Event.PomodoroBegin:
                 self._text_effect = NoneTextEffect()
 
-            elif new_state["mode"] == Modes.OnBreak:
+            case Event.BreakBegin:
                 self._start_color()
                 self._draw_on_break()
 
-            elif new_state["mode"] == Modes.BreakFinish:
+            case Event.BreakFinished:
                 self._shutdown_color()
                 self._draw_default_layout()
+
+            case _:
+                pass
         
-    def refresh(self, state):
+    def refresh(self):
         if self._text_effect.empty():
             self._text_effect.refill()
 
@@ -268,7 +217,7 @@ class TimerTile(Tile):
             start_y=self._start_y, 
             start_x=self._start_x, 
             figlet_render=self._figlet, 
-            time_str=self._figlet_readable_str(state["time"])))
+            time_str=self._figlet_readable_str(self._time)))
 
         self._refresh()
 
@@ -277,6 +226,11 @@ class TimerTile(Tile):
             self.window.addstr(y,x,text,self._color)
         else:
             self.window.addstr(y,x,text)
+    def erase(self):
+        self.window.erase()
+
+    def box(self):
+        self.window.box()
 
     def _draw_on_break(self):
         self.window.box()
@@ -297,51 +251,65 @@ class TimerTile(Tile):
         return " : ".join(numbers_splited)
 
 class AppMessagesTile(Tile):
+    def __init__(self, window, width, height):
+        super().__init__(window, width, height) 
+
+        self._app_messages = []
+
     def draw(self):
         self.window.box()
         self.window.addstr(0, 2, " Mensajes de la aplicación ")
 
-    def process(self, old_state, new_state) -> None:
-        pass
+    def process(self, msg) -> None:
+        if msg.kind == Event.App:
+            self._app_messages.append(msg.msg)
 
-    def refresh(self, state):
-        for index, msg in enumerate(list(reversed(state["app"]))[:self.height-2]):
+    def refresh(self):
+        for index, msg in enumerate(list(reversed(self._app_messages))[:self.height-2]):
             self.window.addstr(index+1,1," " * (self.width - 2))  # Limpiar la línea
             self.window.addstr(index+1,1,msg)
 
         self._refresh()
 
 class CommandInputTile(Tile):
+    def __init__(self, window, width, height):
+        super().__init__(window, width, height) 
+
+        self._command = ""
+
     def draw(self):
         self.window.box()
         self.window.addstr(0, 2, " Comandos tipeados ")
 
-    def process(self, old_state, new_state):
-        pass
+    def process(self, msg):
+        if msg.kind == Event.Cmd:
+            self._command = msg.msg
 
-    def refresh(self, state):
-        self.window.addstr(1, 1, "Último comando presionado: {}".format(state["cmd"]))
+    def refresh(self):
+        self.window.addstr(1, 1, "Último comando presionado: {}".format(self._command))
 
         self._refresh()
 
 class ManualTile(Tile):
     def __init__(self, window, width, height):
         super().__init__(window=window, width=width, height=height)
+
         self._manual = self._timer_manual()
 
     def draw(self):
         self.window.box()
         self.window.addstr(0, 2, " Manual ")
 
-    def process(self, old_state, new_state):
-        if new_state["mode"] == Modes.TimerInit:
+    def process(self, msg):
+        if msg.kind == Event.TimerInit:
             self._manual = self._timer_manual()
-        elif new_state["mode"] == Modes.PomodoroInit:
+        elif msg.kind == Event.PomodoroInit:
             self._manual = self._pomodoro_manual()
 
         self.window.clear()
+        self.draw()
 
-    def refresh(self, state):
+    def refresh(self):
         for index, line in enumerate(list(filter(None,self._manual.splitlines()))):
             self.window.addstr(index+2, 1, line)
         self.window.refresh()
@@ -374,21 +342,23 @@ class InputTile(Tile):
 
         self._show = False
 
-    def process(self, old_state, new_state):
+    def process(self, msg):
+        return
+
         if new_state["mode"] == Modes.InputPurpose:
             self._show = True
         elif new_state["mode"] == Modes.ClosePurpose:
             self._show = False
 
-    def refresh(self, state):
+    def refresh(self):
+        return
+
         if self._show:
             msg = "¿Cuál es el objetivo de este pomodoro?" 
             self.window.border()
             self.window.addstr(0,0, msg)
             purpose = self.window.getstr(0,0,self.width-len(msg)).decode("utf-8")
             raise RuntimeError("Not implemented")
-
-
 
     def draw(self):
         pass
@@ -509,13 +479,3 @@ class TimerRenderInput():
     start_x : int
     figlet_render : Any
     time_str : str
-
-class Modes(StrEnum):
-    Running = auto()
-    Stopped = auto()
-    AudioPlayback = auto()
-    OnBreak = auto()
-    BreakFinish = auto()
-    TimerInit = auto()
-    PomodoroInit = auto()
-

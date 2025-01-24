@@ -26,22 +26,22 @@ def main():
 
     config = load_config_from_file(args=args)
 
-    (Main(args=args, config=config)).run()
+    EventBrokerManager.register("EventBroker", EventBroker)
+    with EventBrokerManager() as manager:
+        msg_queue = manager.EventBroker()
+        (Main(args=args, config=config, msg_queue=msg_queue)).run()
 
 class Main:
-    def __init__(self, args, config):
+    def __init__(self, args, config, msg_queue):
         self._args = args
         self._config = config
 
         self._can_pause = None
-        self._msg_queue = EventBroker()
+        self._msg_queue = msg_queue
         self._pipe_timer, self._pipe_timer_process = multiprocessing.Pipe()
 
-        raise RuntimeError("""
-            Implementar el uso del EventBroker en el timer y el printer. Hacer que los objetos 
-            se susbriban a los eventos que necesiten """)
-        self._timer_process = self._start_timer()
         self._start_printer()
+        self._timer_process = self._start_timer()
 
         self._audio_pipe_father, self._audio_pipe_child = multiprocessing.Pipe()
         self._audio_process = None

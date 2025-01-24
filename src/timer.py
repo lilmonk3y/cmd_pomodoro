@@ -1,7 +1,7 @@
 from datetime import datetime
 import time
 
-from messages import print_time, print_app_msg, event_pomodoro_begin, event_break_begin, event_break_finished
+from messages import Event, print_time, print_app_msg, event_pomodoro_begin, event_break_begin, event_break_finished
 from utils import path_to_file
 
 def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time, msg_queue):
@@ -34,18 +34,24 @@ class Pomodoro:
                  pomodoro_break_duration):
         self._pipe=pipe
         self._msg_queue=msg_queue
+        self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
         self._pomodoros=pomodoros
         self._pomodoro_break_duration=pomodoro_break_duration
 
+        self._wait_printer = True
         self._must_exit = False
         self._on_break = False
         self._seconds = None
 
+
     def run(self):
         self._set_pomodoro()
+
+        while self._wait_printer:
+            self._poll_msg_queue_pipe()
 
         while 0 != self._pomodoros: 
             self._poll_pipe()
@@ -74,6 +80,10 @@ class Pomodoro:
             self._seconds -= 1
 
         self._pipe.send("finished")
+    
+    def _poll_msg_queue_pipe(self):
+        if self._msg_queue_pipe.poll():
+            self._wait_printer = False
 
     def _set_pomodoro(self):
         self._on_break = False
@@ -120,6 +130,7 @@ class Pomodoro:
             
     def _print_pomodoro_finished(self, now):
         print_app_msg(self._msg_queue,pomo_log_line_entry(now,self._tag))
+
 class Timer:
     def __init__(self, 
                  minutes_count, 
@@ -131,15 +142,20 @@ class Timer:
         self._seconds=minutes_count*60
         self._pipe=pipe
         self._msg_queue=msg_queue
+        self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
 
+        self._wait_printer = True
         self._since_last_pomodoro = 0
         self._paused = False
         self._must_exit = False
 
     def run(self):
+        while self._wait_printer:
+            self._poll_msg_queue_pipe()
+
         while 0 <= self._seconds: 
             self._poll_pipe()
 
@@ -166,6 +182,10 @@ class Timer:
             self._since_last_pomodoro += 1
 
         self._pipe.send("finished")
+
+    def _poll_msg_queue_pipe(self):
+        if self._msg_queue_pipe.poll():
+            self._wait_printer = False
 
     def _poll_pipe(self):
         if self._pipe.poll():

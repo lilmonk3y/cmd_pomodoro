@@ -1,25 +1,17 @@
 from abc import abstractmethod, ABC
-from enum import StrEnum, auto
+from enum import auto, Enum
 from dataclasses import dataclass
-from multiprocessing import Queue
+import logging
+import queue
+from multiprocessing.managers import BaseManager
+from multiprocessing import Pipe
+from os import getpid
 
-class MsgType(StrEnum):
-    Time = auto()
+class Event(Enum):
+    TimeChange = auto()
     App = auto()
     Cmd = auto()
     Termination = auto()
-    Event = auto()
-    Empty = auto()
-
-@dataclass(frozen=True)
-class Msg():
-    kind : MsgType
-    msg : str
-
-    def __str__(self):
-        return "kind: {}, msg: {}".format(self.kind, self.msg)
-
-class Event(StrEnum):
     AudioPlayback = auto()
     AudioStopped = auto()
     Stopped = auto()
@@ -29,79 +21,92 @@ class Event(StrEnum):
     BreakFinished = auto()
     PomodoroInit = auto()
     TimerInit = auto()
+    PrinterReady = auto()
+
+@dataclass(frozen=True)
+class EventMsg():
+    kind : Event
+    msg : str = ""
+
+    def __str__(self):
+        return "kind: {}, msg: {}".format(self.kind, self.msg)
 
 class Consumer(ABC):
     @abstractmethod
     def consume(self, event: Event):
         raise RuntimeError("Shouldn't be used")
 
+class EventBrokerManager(BaseManager):
+    pass
+
 class EventBroker:
     def __init__(self):
-        self._msg_queue = Queue()
-        self._event_consumers = self._init_event_dict()
+        self._logger = logging.getLogger(".event_broker")
 
-    def suscribe(self, consumer: Consumer, *events):
+        self._msg_queue = queue.Queue()
+        self._event_consumers = {event:[] for event in Event}
+
+    def suscribe(self, *events):
+        (ours, theirs) = Pipe()
         for event in events:
             if event in self._event_consumers.keys():
-                self._event_consumers[event].append(consumer)
+                self._logger.info("Process {} suscribed to event {}".format(getpid(),event))
+                self._event_consumers[event].append(ours)
             else:
                 raise RuntimeError("Event {} is not a valid event".format(event))
 
-    def publish(self, msg: Msg):
-        assert msg.kind == MsgType.Event
-        
-        event = msg.msg
-        for consumer in self._event_consumers[event]:
-            consumer.consume(event)
+        return theirs
 
+    def publish(self, msg: EventMsg):
+        #assert self._event_consumers[msg.kind], "Tengo al menos un consumidor para el mensaje msg"
 
-    def _init_event_dict(self):
-        event_consumers = dict()
-        for event in Event:
-            event_consumers[event] = []
-
-        return event_consumers
-
-
+        for consumer in self._event_consumers[msg.kind]:
+            consumer.send(msg)
+            self._logger.info("Process {} has a new msg in it's pipe. msg: {}".format(getpid(), msg))
 
 def print_time(msg_queue, time):
-    _send(msg_queue, Msg(MsgType.Time, time))
+    _send(msg_queue, EventMsg(Event.TimeChange, time))
 
 def print_app_msg(msg_queue, msg):
-    _send(msg_queue, Msg(MsgType.App, msg))
+    _send(msg_queue, EventMsg(Event.App, msg))
 
 def print_cmd_msg(msg_queue, msg):
-    _send(msg_queue, Msg(MsgType.Cmd, msg))
+    _send(msg_queue, EventMsg(Event.Cmd, msg))
 
 def print_terminate(msg_queue):
-    _send(msg_queue, Msg(MsgType.Termination, ""))
+    _send(msg_queue, EventMsg(Event.Termination))
 
 def event_playback(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.AudioPlayback))
+    _send(msg_queue, EventMsg(Event.AudioPlayback))
 
 def event_audio_stopped(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.AudioStopped))
+    _send(msg_queue, EventMsg(Event.AudioStopped))
 
 def event_stopped(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.Stopped))
+    _send(msg_queue, EventMsg(Event.Stopped))
 
 def event_resumed(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.Resumed))
+    _send(msg_queue, EventMsg(Event.Resumed))
 
 def event_timer_init(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.TimerInit))
+    _send(msg_queue, EventMsg(Event.TimerInit))
 
 def event_pomodoro_init(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.PomodoroInit))
+    _send(msg_queue, EventMsg(Event.PomodoroInit))
 
 def event_pomodoro_begin(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.PomodoroBegin))
+    _send(msg_queue, EventMsg(Event.PomodoroBegin))
 
 def event_break_begin(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.BreakBegin))
+    _send(msg_queue, EventMsg(Event.BreakBegin))
 
 def event_break_finished(msg_queue):
-    _send(msg_queue, Msg(MsgType.Event, Event.BreakFinished))
+    _send(msg_queue, EventMsg(Event.BreakFinished))
 
-def _send(msg_queue, msg): # msg : Msg
+def event_printer_ready(msg_queue):
+    _send(msg_queue, EventMsg(Event.PrinterReady))
+
+def _send(msg_queue, msg: EventMsg):
+    logger = logging.getLogger(".messages")
+    logger.info("sending msg from {} {}".format(getpid(), msg))
     msg_queue.publish(msg)
