@@ -1,22 +1,22 @@
 from datetime import datetime
 import time
 
-from messages import Event, print_time, print_app_msg, event_pomodoro_begin, event_break_begin, event_break_finished
+from messages import Event, print_time, print_app_msg, event_pomodoro_begin, event_timer_stopped
+from messages import event_break_begin, event_break_finished, event_audio_pomodoro_finished
+from messages import event_timer_finished
 from utils import path_to_file
 
-def timer(timer_pipe, minutes_count, tag, log_file, pomodoro_time, msg_queue):
+def timer(minutes_count, tag, log_file, pomodoro_time, msg_queue):
     """Timer process manages the pomodoros and the logging of them"""
     
     (Timer(minutes_count=minutes_count,
-           pipe=timer_pipe,
            msg_queue=msg_queue,
            pomodoro_time=pomodoro_time,
            log_file=log_file,
            tag=tag)).run()
 
-def pomodoro(pipe, pomodoros, tag, pomodoro_time, pomodoro_break_duration, path_to_log, msg_queue):
+def pomodoro(pomodoros, tag, pomodoro_time, pomodoro_break_duration, path_to_log, msg_queue):
     (Pomodoro(pomodoros=pomodoros,
-           pipe=pipe,
            msg_queue=msg_queue,
            pomodoro_time=pomodoro_time,
            log_file=path_to_log,
@@ -26,15 +26,14 @@ def pomodoro(pipe, pomodoros, tag, pomodoro_time, pomodoro_break_duration, path_
 class Pomodoro:
     def __init__(self, 
                  pomodoros,
-                 pipe, 
                  msg_queue, 
                  pomodoro_time,
                  log_file,
                  tag,
                  pomodoro_break_duration):
-        self._pipe=pipe
         self._msg_queue=msg_queue
-        self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
+        #self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
+        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event])
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
@@ -73,13 +72,12 @@ class Pomodoro:
 
             elif self._is_break_ended():
                 event_break_finished(self._msg_queue)
-                self._pipe.send("audio_break_ended")
                 self._set_pomodoro()
 
             time.sleep(1)
             self._seconds -= 1
 
-        self._pipe.send("finished")
+        event_timer_finished(self._msg_queue)
     
     def _poll_msg_queue_pipe(self):
         if self._msg_queue_pipe.poll():
@@ -93,22 +91,20 @@ class Pomodoro:
     def _set_break(self):
         self._on_break = True
         self._seconds = self._pomodoro_break_duration * 60
-        self._pipe.send("audio_pomodoro_finished")
+        event_audio_pomodoro_finished(self._msg_queue)
         event_break_begin(self._msg_queue)
 
     def _poll_pipe(self):
-        if self._pipe.poll():
-            msg = self._pipe.recv()
-
-            if msg == "pause":
-                self._paused = True
-            elif msg == "continue":
-                self._paused = False
-            elif msg == "stop":
-                self._pipe.send("stopped")
-                self._must_exit = True
-            else:
-                raise RuntimeError(f"Message {msg} is unhandled by timer")
+        if self._msg_queue_pipe.poll():
+            msg = self._msg_queue_pipe.recv()
+            match msg.kind:
+                case Event.Stopped:
+                    self._paused = True
+                case Event.Resumed:
+                    self._paused = False
+                case Event.StopTimer:
+                    event_timer_stopped(self._msg_queue)
+                    self._must_exit = True
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())
@@ -134,15 +130,14 @@ class Pomodoro:
 class Timer:
     def __init__(self, 
                  minutes_count, 
-                 pipe, 
                  msg_queue, 
                  pomodoro_time,
                  log_file,
                  tag):
         self._seconds=minutes_count*60
-        self._pipe=pipe
         self._msg_queue=msg_queue
-        self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
+        #self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
+        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event])
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
@@ -173,7 +168,7 @@ class Timer:
                 self._print_pomodoro_finished(now)
 
                 if 0 < self._seconds:
-                    self._pipe.send("audio_pomodoro_finished")
+                    event_audio_pomodoro_finished(self._msg_queue)
 
                 self._since_last_pomodoro = 0
 
@@ -181,25 +176,24 @@ class Timer:
             self._seconds -= 1
             self._since_last_pomodoro += 1
 
-        self._pipe.send("finished")
+        event_timer_finished(self._msg_queue)
 
     def _poll_msg_queue_pipe(self):
         if self._msg_queue_pipe.poll():
             self._wait_printer = False
 
     def _poll_pipe(self):
-        if self._pipe.poll():
-            msg = self._pipe.recv()
-
-            if msg == "pause":
-                self._paused = True
-            elif msg == "continue":
-                self._paused = False
-            elif msg == "stop":
-                self._pipe.send("stopped")
-                self._must_exit = True
-            else:
-                raise RuntimeError(f"Message {msg} is unhandled by timer")
+        if self._msg_queue_pipe.poll():
+            msg = self._msg_queue_pipe.recv()
+            
+            match msg.kind:
+                case Event.TimerStopped:
+                    self._paused = True
+                case Event.Resumed:
+                    self._paused = False
+                case Event.Termination:
+                    event_timer_stopped(self._msg_queue)
+                    self._must_exit = True
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())

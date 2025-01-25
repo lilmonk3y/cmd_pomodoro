@@ -35,28 +35,25 @@ class Main:
     def __init__(self, args, config, msg_queue):
         self._args = args
         self._config = config
-
-        self._can_pause = None
         self._msg_queue = msg_queue
-        self._pipe_timer, self._pipe_timer_process = multiprocessing.Pipe()
+
+        #self._msg_queue_pipe = self._msg_queue.suscribe(Event.TimerFinished,Event.TimerStopped,Event.AudioPomodoroFinished,Event.BreakFinished)
+        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event])
+
+        self._audio_process = None
+        self._stopwatch = None
+
+        self._can_pause = True
+        self._paused = False
+        self._must_finish = False
 
         self._start_printer()
         self._timer_process = self._start_timer()
 
-        self._audio_pipe_father, self._audio_pipe_child = multiprocessing.Pipe()
-        self._audio_process = None
-
-        self._stopwatch = None
-
-        self._paused = False
-        self._must_finish = False
-
     def run(self):
         try:
             while not self._must_finish:
-                self._poll_timer_msgs()
-
-                self._poll_audioplayer_msgs()
+                self._poll_events()
 
                 self._handle_cmds_pressed_if_any()
 
@@ -77,21 +74,18 @@ class Main:
             self._can_pause = True
             timer_process = multiprocessing.Process(
                     target=timer, 
-                    args=(
-                        self._pipe_timer_process, 
-                        self._args.minutes_count, 
-                        self._args.tag, 
-                        self._config.path_to_log, 
-                        self._config.pomodoro_time, 
-                        self._msg_queue))
+                    args=(self._args.minutes_count, 
+                          self._args.tag, 
+                          self._config.path_to_log, 
+                          self._config.pomodoro_time, 
+                          self._msg_queue))
 
         elif self._args.cmd == "pomodoro":
             event_pomodoro_init(self._msg_queue)
             self._can_pause = False
             timer_process = multiprocessing.Process(
                     target=pomodoro,
-                    args=(self._pipe_timer_process,
-                          self._args.pomodoros,
+                    args=(self._args.pomodoros,
                           self._args.tag,
                           self._config.pomodoro_time,
                           self._config.pomodoro_break_duration,
@@ -105,52 +99,44 @@ class Main:
 
         return timer_process
 
-    def _poll_timer_msgs(self):
-        if self._pipe_timer.poll():
-            msg = self._pipe_timer.recv()
+    def _poll_events(self):
+        while self._msg_queue_pipe.poll():
+            msg = self._msg_queue_pipe.recv()
+            match msg.kind:
+                case Event.TimerFinished:
+                    publish_notification(finished_info_msg(self._args))
+                    event_playback(self._msg_queue)
+                    self._audio_process = play_audio_on_subprocess(self._args, self._config.path_pc, self._msg_queue)
 
-            if msg == "finished":
-                publish_notification(finished_info_msg(self._args))
-                event_playback(self._msg_queue)
-                self._audio_process = play_audio_on_subprocess(self._args, self._config.path_pc, self._audio_pipe_child)
+                case Event.TimerStopped:
+                    print_app_msg(self._msg_queue, "Relog apagado")
+                    self._must_finish = True
 
-            elif msg == "stopped":
-                print_app_msg(self._msg_queue, "Relog apagado")
-                self._must_finish = True
+                case Event.AudioPomodoroFinished:
+                    event_playback(self._msg_queue)
+                    (multiprocessing.Process(
+                        target=audio_process_short, 
+                        args=(
+                            self._args, 
+                            self._config.between_pomodoros_sound, 
+                            self._msg_queue))).start()
 
-            elif msg == "audio_pomodoro_finished":
-                event_playback(self._msg_queue)
-                (multiprocessing.Process(
-                    target=audio_process_short, 
-                    args=(
-                        self._args, 
-                        self._config.between_pomodoros_sound, 
-                        self._msg_queue))).start()
+                case Event.BreakFinished:
+                    event_playback(self._msg_queue)
+                    (multiprocessing.Process(
+                        target=audio_process_short, 
+                        args=(
+                            self._args, 
+                            self._config.audio_pomodoro_break_finish, 
+                            self._msg_queue))).start()
+                case Event.AudioEnded:
+                    event_audio_stopped(self._msg_queue)
+                    print_app_msg(self._msg_queue, "Felicitaciones por el período de estudio! Te mereces un descanso.")
+                    time.sleep(2)
+                    self._must_finish = True
 
-            elif msg == "audio_break_ended":
-                event_playback(self._msg_queue)
-                (multiprocessing.Process(
-                    target=audio_process_short, 
-                    args=(
-                        self._args, 
-                        self._config.audio_pomodoro_break_finish, 
-                        self._msg_queue))).start()
-
-            else:
-                raise RuntimeError(f"Message {msg} is unhandled by main process")
-
-    def _poll_audioplayer_msgs(self):
-        if audio_process and self._audio_pipe_father.poll():
-            msg = self._audio_pipe_father.recv()
-
-            if msg == "audio_ended":
-                event_audio_stopped(self._msg_queue)
-                print_app_msg(self._msg_queue, "Felicitaciones por el período de estudio! Te mereces un descanso.")
-                time.sleep(2)
-                self._must_finish = True
-
-            else:
-                raise RuntimeError(f"Message {msg} is unhandled by main process")
+                case _:
+                    pass
 
     def _handle_cmds_pressed_if_any(self):
         key = get_key()
@@ -166,7 +152,6 @@ class Main:
                 print_cmd_msg(self._msg_queue,"p")
                 event_stopped(self._msg_queue)
                 print_app_msg(self._msg_queue,"Cuenta atrás pausada.")
-                self._pipe_timer.send("pause")
 
             case "c":
                 if not self._paused:
@@ -176,11 +161,10 @@ class Main:
                 print_cmd_msg(self._msg_queue,"c")
                 event_resumed(self._msg_queue)
                 print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
-                self._pipe_timer.send("continue")
 
             case "f":
                 print_cmd_msg(self._msg_queue,"f")
-                self._pipe_timer.send("stop")
+                event_stop_timer(self._msg_queue)
             
             case "t":
                 print_cmd_msg(self._msg_queue,"t")
@@ -197,14 +181,14 @@ class Main:
             case "s":
                 if self._audio_process:
                     print_cmd_msg(self._msg_queue,"s")
-                    self._audio_pipe_father.send("audio_terminate")
+                    event_audio_terminate(self._msg_queue)
                     self._audio_process.join()
             
             case _:
                 pass
 
     def _finish_gracefully(self):
-        self._pipe_timer.send("stop")
+        event_stop_timer(self._msg_queue)
 
         if self._stopwatch:
             self._stopwatch.terminate()
@@ -219,7 +203,7 @@ class Main:
         self.printer_process.join()
 
     def _finish_unsuccessfully(self):
-        self._pipe_timer.send("stop")
+        event_stop_timer(self._msg_queue)
         # self._timer_process.terminate()
 
         if self._stopwatch:
@@ -258,8 +242,8 @@ def finished_info_msg(args):
             "Felicitaciones por el período de estudio! Te mereces un descanso."
             ]
 
-def play_audio_on_subprocess(args, audio_track_path, audio_pipe):
-    process = multiprocessing.Process(target=audio_process, args=(args, audio_track_path, audio_pipe))
+def play_audio_on_subprocess(args, audio_track_path, msg_queue):
+    process = multiprocessing.Process(target=audio_process, args=(args, audio_track_path, msg_queue))
     process.start()
     return process
 

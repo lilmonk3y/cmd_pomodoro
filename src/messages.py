@@ -22,6 +22,12 @@ class Event(Enum):
     PomodoroInit = auto()
     TimerInit = auto()
     PrinterReady = auto()
+    AudioPomodoroFinished = auto()
+    TimerStopped = auto()
+    TimerFinished = auto()
+    AudioEnded = auto()
+    StopTimer = auto()
+    AudioTerminate = auto()
 
 @dataclass(frozen=True)
 class EventMsg():
@@ -105,6 +111,24 @@ def event_break_finished(msg_queue):
 
 def event_printer_ready(msg_queue):
     _send(msg_queue, EventMsg(Event.PrinterReady))
+
+def event_audio_pomodoro_finished(msg_queue):
+    _send(msg_queue, EventMsg(Event.AudioPomodoroFinished))
+
+def event_timer_stopped(msg_queue):
+    _send(msg_queue, EventMsg(Event.TimerStopped))
+
+def event_timer_finished(msg_queue):
+    _send(msg_queue, EventMsg(Event.TimerFinished))
+
+def event_audio_ended(msg_queue):
+    _send(msg_queue, EventMsg(Event.AudioEnded))
+
+def event_stop_timer(msg_queue):
+    _send(msg_queue, EventMsg(Event.StopTimer))
+
+def event_audio_terminate(msg_queue):
+    _send(msg_queue, EventMsg(Event.AudioTerminate))
 
 def _send(msg_queue, msg: EventMsg):
     logger = logging.getLogger(".messages")

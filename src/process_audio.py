@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from utils import path_to_file, file_path_in_home
 from global_data import TEMPORARY_PATH
-from messages import event_audio_stopped
+from messages import event_audio_stopped, event_audio_ended, Event
 
 def audio_process(args, audio_path, audio_pipe):
     """audio - play audio on background"""
@@ -25,7 +25,7 @@ def audio_process(args, audio_path, audio_pipe):
             if audio_pipe.poll():
                 msg = audio_pipe.recv()
 
-                if msg == "audio_terminate":
+                if msg.kind == Event.AudioTerminate:
                     play_object.stop()
                     break
 
@@ -33,6 +33,7 @@ def audio_process(args, audio_path, audio_pipe):
                 time.sleep(0.5)
 
         audio_pipe.send("audio_ended")
+        event_audio_ended(msg_queue)
         audio_pipe.close()
 
     finally:
