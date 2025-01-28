@@ -37,11 +37,6 @@ class EventMsg():
     def __str__(self):
         return "kind: {}, msg: {}".format(self.kind, self.msg)
 
-class Consumer(ABC):
-    @abstractmethod
-    def consume(self, event: Event):
-        raise RuntimeError("Shouldn't be used")
-
 class EventBrokerManager(BaseManager):
     pass
 
@@ -52,12 +47,12 @@ class EventBroker:
         self._msg_queue = queue.Queue()
         self._event_consumers = {event:[] for event in Event}
 
-    def suscribe(self, *events):
+    def suscribe(self, *events, suscriber):
         (ours, theirs) = Pipe()
         for event in events:
             if event in self._event_consumers.keys():
                 self._logger.info("Process {} suscribed to event {}".format(getpid(),event))
-                self._event_consumers[event].append(ours)
+                self._event_consumers[event].append((ours, suscriber))
             else:
                 raise RuntimeError("Event {} is not a valid event".format(event))
 
@@ -66,9 +61,16 @@ class EventBroker:
     def publish(self, msg: EventMsg):
         #assert self._event_consumers[msg.kind], "Tengo al menos un consumidor para el mensaje msg"
 
-        for consumer in self._event_consumers[msg.kind]:
+        for consumer, _ in self._event_consumers[msg.kind]:
             consumer.send(msg)
             self._logger.info("Process {} has a new msg in it's pipe. msg: {}".format(getpid(), msg))
+
+    def unsuscribe(self, suscriber_id, event_list):
+        for event in event_list:
+            for index, (_, theirs_id) in enumerate(self._event_consumers[event]):
+                if theirs_id == suscriber_id:
+                    self._event_consumers[event].pop(index)
+                    self._logger.info("deleted consumer {} from event {}".format(suscriber_id, event))
 
 def print_time(msg_queue, time):
     _send(msg_queue, EventMsg(Event.TimeChange, time))

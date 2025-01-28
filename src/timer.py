@@ -1,5 +1,6 @@
 from datetime import datetime
 import time
+from os import getpid
 
 from messages import Event, print_time, print_app_msg, event_pomodoro_begin, event_timer_stopped
 from messages import event_break_begin, event_break_finished, event_audio_pomodoro_finished
@@ -33,7 +34,7 @@ class Pomodoro:
                  pomodoro_break_duration):
         self._msg_queue=msg_queue
         #self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
-        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event])
+        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
@@ -77,11 +78,15 @@ class Pomodoro:
             time.sleep(1)
             self._seconds -= 1
 
+        self._msg_queue.unsuscribe(getpid(), [event for event in Event])
         event_timer_finished(self._msg_queue)
     
     def _poll_msg_queue_pipe(self):
         if self._msg_queue_pipe.poll():
-            self._wait_printer = False
+            msg = self._msg_queue_pipe.recv()
+            match msg.kind:
+                case Event.PrinterReady:
+                    self._wait_printer = False
 
     def _set_pomodoro(self):
         self._on_break = False
@@ -137,7 +142,7 @@ class Timer:
         self._seconds=minutes_count*60
         self._msg_queue=msg_queue
         #self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
-        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event])
+        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
@@ -176,11 +181,15 @@ class Timer:
             self._seconds -= 1
             self._since_last_pomodoro += 1
 
+        self._msg_queue.unsuscribe(getpid(), [event for event in Event])
         event_timer_finished(self._msg_queue)
 
     def _poll_msg_queue_pipe(self):
         if self._msg_queue_pipe.poll():
-            self._wait_printer = False
+            msg = self._msg_queue_pipe.recv()
+            match msg.kind:
+                case Event.PrinterReady:
+                    self._wait_printer = False
 
     def _poll_pipe(self):
         if self._msg_queue_pipe.poll():

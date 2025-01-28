@@ -5,6 +5,7 @@ import curses
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
+from os import getpid
 
 from messages import EventMsg, Event, event_printer_ready
 
@@ -78,7 +79,7 @@ class Screen:
         self._must_update = datetime.now()
         self._must_finish = False
 
-        self._msgs_pipe = self._msg_queue.suscribe( Event.TimeChange, Event.App,    Event.Cmd , Event.Termination, Event.AudioPlayback, Event.AudioStopped, Event.Stopped, Event.Resumed, Event.PomodoroBegin, Event. BreakBegin, Event.BreakFinished, Event.PomodoroInit, Event.TimerInit)
+        self._msgs_pipe = self._msg_queue.suscribe(*[event for event in Event],suscriber=getpid())
         self._logger = logging.getLogger(".printer")
 
     def run(self):
@@ -97,6 +98,7 @@ class Screen:
 
             if msg.kind == Event.Termination:
                 self._must_finish = True
+                self._msg_queue.unsuscribe(getpid(), [event for event in Event])
                 return
 
             for layout in self._layouts:

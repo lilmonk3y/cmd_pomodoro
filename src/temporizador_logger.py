@@ -37,8 +37,7 @@ class Main:
         self._config = config
         self._msg_queue = msg_queue
 
-        #self._msg_queue_pipe = self._msg_queue.suscribe(Event.TimerFinished,Event.TimerStopped,Event.AudioPomodoroFinished,Event.BreakFinished)
-        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event])
+        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
 
         self._audio_process = None
         self._stopwatch = None
@@ -201,6 +200,7 @@ class Main:
 
         print_terminate(self._msg_queue)
         self.printer_process.join()
+        self._msg_queue.unsuscribe(getpid(), [event for event in Event])
 
     def _finish_unsuccessfully(self):
         event_stop_timer(self._msg_queue)
@@ -213,6 +213,7 @@ class Main:
             self._audio_process.terminate()
 
         self.printer_process.terminate()
+        self._msg_queue.unsuscribe(getpid(), [event for event in Event])
 
 
 def get_key():
