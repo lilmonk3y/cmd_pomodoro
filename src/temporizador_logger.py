@@ -45,6 +45,7 @@ class Main:
         self._can_pause = True
         self._paused = False
         self._must_finish = False
+        self._in_purpose_add = False
 
         self._start_printer()
         self._timer_process = self._start_timer()
@@ -77,7 +78,8 @@ class Main:
                           self._args.tag, 
                           self._config.path_to_log, 
                           self._config.pomodoro_time, 
-                          self._msg_queue))
+                          self._msg_queue,
+                          self._args.purpose))
 
         elif self._args.cmd == "pomodoro":
             event_pomodoro_init(self._msg_queue)
@@ -128,16 +130,23 @@ class Main:
                             self._args, 
                             self._config.audio_pomodoro_break_finish, 
                             self._msg_queue))).start()
+
                 case Event.AudioEnded:
                     event_audio_stopped(self._msg_queue)
                     print_app_msg(self._msg_queue, "Felicitaciones por el período de estudio! Te mereces un descanso.")
                     time.sleep(2)
                     self._must_finish = True
 
+                case Event.PurposeFinished:
+                    self._in_purpose_add = False
+
                 case _:
                     pass
 
     def _handle_cmds_pressed_if_any(self):
+        if not self._get_input_keys():
+            return
+
         key = get_key()
         match key:
             case "p":
@@ -182,12 +191,19 @@ class Main:
                     print_cmd_msg(self._msg_queue,"s")
                     event_audio_terminate(self._msg_queue)
                     self._audio_process.join()
+
+            case "i":
+                event_add_purpose(self._msg_queue)
+                self._in_purpose_add = True
             
             case _:
                 pass
 
+    def _get_input_keys(self):
+        return not self._in_purpose_add
+
     def _finish_gracefully(self):
-        event_stop_timer(self._msg_queue)
+        event_terminate(self._msg_queue)
 
         if self._stopwatch:
             self._stopwatch.terminate()
@@ -198,13 +214,12 @@ class Main:
         if self._audio_process:
             self._audio_process.join()
 
-        print_terminate(self._msg_queue)
         self.printer_process.join()
         self._msg_queue.unsuscribe(getpid(), [event for event in Event])
 
     def _finish_unsuccessfully(self):
         event_stop_timer(self._msg_queue)
-        # self._timer_process.terminate()
+        event_terminate(self._msg_queue)
 
         if self._stopwatch:
             self._stopwatch.terminate()

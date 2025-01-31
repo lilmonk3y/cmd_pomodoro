@@ -28,6 +28,10 @@ class Event(Enum):
     AudioEnded = auto()
     StopTimer = auto()
     AudioTerminate = auto()
+    AddPurpose = auto()
+    PurposeFinished = auto()
+    PurposeAdded = auto()
+    LayoutDraw = auto()
 
 @dataclass(frozen=True)
 class EventMsg():
@@ -81,7 +85,7 @@ def print_app_msg(msg_queue, msg):
 def print_cmd_msg(msg_queue, msg):
     _send(msg_queue, EventMsg(Event.Cmd, msg))
 
-def print_terminate(msg_queue):
+def event_terminate(msg_queue):
     _send(msg_queue, EventMsg(Event.Termination))
 
 def event_playback(msg_queue):
@@ -131,6 +135,18 @@ def event_stop_timer(msg_queue):
 
 def event_audio_terminate(msg_queue):
     _send(msg_queue, EventMsg(Event.AudioTerminate))
+
+def event_add_purpose(msg_queue):
+    _send(msg_queue, EventMsg(Event.AddPurpose))
+
+def event_purpose_added(msg_queue, purpose):
+    _send(msg_queue, EventMsg(Event.PurposeAdded, purpose))
+
+def event_purpose_finished(msg_queue):
+    _send(msg_queue, EventMsg(Event.PurposeFinished))
+
+def event_layout_draw(msg_queue):
+    _send(msg_queue, EventMsg(Event.LayoutDraw))
 
 def _send(msg_queue, msg: EventMsg):
     logger = logging.getLogger(".messages")

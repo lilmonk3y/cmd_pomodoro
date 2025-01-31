@@ -82,6 +82,11 @@ def _build_parser():
             type=str, 
             default=None,
             help="Tarea en la que se dedicó el tiempo del pomodoro.")
+    timer_parser.add_argument(
+            "-purpose", "-p", 
+            type=str, 
+            default=None,
+            help="Intención u objetivo que se quiere cumplir en este pomodoro")
 
     # pomodoro command
     pomodoro_parser = subparser.add_parser("pomodoro", help="Comienza tantos pomodoros como se pase por argumento.")
@@ -94,6 +99,11 @@ def _build_parser():
             "-tag", "-t", 
             type=str, 
             help="Tarea en la que se dedicó el tiempo del pomodoro.")
+    pomodoro_parser.add_argument(
+            "-purpose", "-p", 
+            type=str, 
+            default=None,
+            help="Intención u objetivo que se quiere cumplir en este pomodoro.")
 
     # config command
     config_parser = subparser.add_parser(

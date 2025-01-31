@@ -7,22 +7,24 @@ from messages import event_break_begin, event_break_finished, event_audio_pomodo
 from messages import event_timer_finished
 from utils import path_to_file
 
-def timer(minutes_count, tag, log_file, pomodoro_time, msg_queue):
+def timer(minutes_count, tag, log_file, pomodoro_time, msg_queue, purpose):
     """Timer process manages the pomodoros and the logging of them"""
     
     (Timer(minutes_count=minutes_count,
            msg_queue=msg_queue,
            pomodoro_time=pomodoro_time,
            log_file=log_file,
-           tag=tag)).run()
+           tag=tag,
+           purpose=purpose)).run()
 
-def pomodoro(pomodoros, tag, pomodoro_time, pomodoro_break_duration, path_to_log, msg_queue):
+def pomodoro(pomodoros, tag, pomodoro_time, pomodoro_break_duration, path_to_log, msg_queue, purpose):
     (Pomodoro(pomodoros=pomodoros,
            msg_queue=msg_queue,
            pomodoro_time=pomodoro_time,
            log_file=path_to_log,
            tag=tag,
-           pomodoro_break_duration=pomodoro_break_duration)).run()
+           pomodoro_break_duration=pomodoro_break_duration,
+           purpose=purpose)).run()
 
 class Pomodoro:
     def __init__(self, 
@@ -31,21 +33,21 @@ class Pomodoro:
                  pomodoro_time,
                  log_file,
                  tag,
-                 pomodoro_break_duration):
+                 pomodoro_break_duration,
+                 purpose):
         self._msg_queue=msg_queue
-        #self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
         self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
         self._pomodoros=pomodoros
         self._pomodoro_break_duration=pomodoro_break_duration
+        self._purpose = purpose
+        self._seconds = self._pomodoro_time * 60
 
         self._wait_printer = True
         self._must_exit = False
         self._on_break = False
-        self._seconds = None
-
 
     def run(self):
         self._set_pomodoro()
@@ -125,12 +127,13 @@ class Pomodoro:
         return self._on_break and self._seconds == 0
 
     def _log_to_file(self, now):
-        text = pomo_log_line_entry(now, self._tag)
+        text = pomo_log_line_entry(now, self._tag, self._purpose)
         with open(path_to_file(self._log_file), "a") as log:
             log.write("\n" + text )
             
     def _print_pomodoro_finished(self, now):
-        print_app_msg(self._msg_queue,pomo_log_line_entry(now,self._tag))
+        text = pomo_log_line_entry(now, self._tag, self._purpose)
+        print_app_msg(self._msg_queue,text)
 
 class Timer:
     def __init__(self, 
@@ -138,14 +141,15 @@ class Timer:
                  msg_queue, 
                  pomodoro_time,
                  log_file,
-                 tag):
+                 tag,
+                 purpose):
         self._seconds=minutes_count*60
         self._msg_queue=msg_queue
-        #self._msg_queue_pipe = self._msg_queue.suscribe(Event.PrinterReady)
         self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
+        self._purpose = purpose
 
         self._wait_printer = True
         self._since_last_pomodoro = 0
@@ -198,11 +202,16 @@ class Timer:
             match msg.kind:
                 case Event.TimerStopped:
                     self._paused = True
+
                 case Event.Resumed:
                     self._paused = False
+
                 case Event.Termination:
                     event_timer_stopped(self._msg_queue)
                     self._must_exit = True
+
+                case Event.PurposeAdded:
+                    self._purpose = msg.msg
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())
@@ -216,17 +225,23 @@ class Timer:
         return pomodoro_in_seconds <= self._since_last_pomodoro
 
     def _log_to_file(self, now):
-        text = pomo_log_line_entry(now, self._tag)
+        text = pomo_log_line_entry(now, self._tag, self._purpose)
         with open(path_to_file(self._log_file), "a") as log:
             log.write("\n" + text )
             
     def _print_pomodoro_finished(self, now):
-        print_app_msg(self._msg_queue,pomo_log_line_entry(now,self._tag))
+        print_app_msg(self._msg_queue,pomo_log_line_entry(now,self._tag, self._purpose))
 
-def pomo_log_line_entry(now, tag):
+def pomo_log_line_entry(now, tag, purpose=None):
     date = now.strftime("%y-%m-%d")
     time_str = now.strftime("%H:%M")
     text = "🍅 {} , {}".format(date, time_str)
     if tag:
-        text = text + " , #{}".format(tag)
+        text += " , #{}".format(tag)
+    if purpose:
+        if tag:
+            text += " , {}".format(purpose)
+        else:
+            text += " , , {}".format(purpose)
+
     return text

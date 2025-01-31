@@ -7,12 +7,15 @@ from dataclasses import dataclass
 import logging
 from os import getpid
 
-from messages import EventMsg, Event, event_printer_ready
+from messages import *
 
 def printer(msg_queue):
     curses.wrapper(printer_display, msg_queue)
 
 def printer_display(stdscr, msg_queue):
+    global _msg_queue 
+    _msg_queue = msg_queue
+
     # Configurar curses
     curses.curs_set(0)  # Ocultar el cursor
     stdscr.clear()
@@ -24,8 +27,7 @@ def printer_display(stdscr, msg_queue):
 
     (Screen(
         build_main_layout(height,width),
-        build_input_layout(height,width),
-        msg_queue=msg_queue
+        build_input_layout(height,width)
      )).run()
 
 def build_main_layout(height,width):
@@ -61,30 +63,29 @@ def build_main_layout(height,width):
                 height=manual_height))
 
 def build_input_layout(height, width):
-    height = height - 30
-    width = width - 30
+    win_height = height // 3
+    win_width = width // 3
     
-    window = curses.newwin(height, width, 0, 0)
+    window = curses.newwin(win_height, win_width, height//3, width//3)
 
     return Layout(
             InputTile(
                 window=window,
-                width= width,
-                height=height))
+                width=win_width,
+                height=win_height))
 
 class Screen:
-    def __init__(self, *layouts,msg_queue):
-        self._msg_queue = msg_queue
+    def __init__(self, *layouts):
         self._layouts = layouts
         self._must_update = datetime.now()
         self._must_finish = False
 
-        self._msgs_pipe = self._msg_queue.suscribe(*[event for event in Event],suscriber=getpid())
+        self._msgs_pipe = _msg_queue.suscribe(*[event for event in Event],suscriber=getpid())
         self._logger = logging.getLogger(".printer")
 
     def run(self):
         self._draw_layout()
-        event_printer_ready(self._msg_queue)
+        event_printer_ready(_msg_queue)
 
         while not self._must_finish:
             self._pool_for_msgs()
@@ -98,8 +99,11 @@ class Screen:
 
             if msg.kind == Event.Termination:
                 self._must_finish = True
-                self._msg_queue.unsuscribe(getpid(), [event for event in Event])
+                _msg_queue.unsuscribe(getpid(), [event for event in Event])
                 return
+
+            if msg.kind == Event.LayoutDraw:
+                self._draw_layout()
 
             for layout in self._layouts:
                 layout.process(msg)
@@ -182,6 +186,7 @@ class TimerTile(Tile):
         self._color = None
 
     def draw(self):
+        self.window.clear()
         self._draw_default_layout()
 
     def process(self, msg):
@@ -259,6 +264,7 @@ class AppMessagesTile(Tile):
         self._app_messages = []
 
     def draw(self):
+        self.window.clear()
         self.window.box()
         self.window.addstr(0, 2, " Mensajes de la aplicación ")
 
@@ -280,6 +286,7 @@ class CommandInputTile(Tile):
         self._command = ""
 
     def draw(self):
+        self.window.clear()
         self.window.box()
         self.window.addstr(0, 2, " Comandos tipeados ")
 
@@ -299,6 +306,7 @@ class ManualTile(Tile):
         self._manual = self._timer_manual()
 
     def draw(self):
+        self.window.clear()
         self.window.box()
         self.window.addstr(0, 2, " Manual ")
 
@@ -345,22 +353,28 @@ class InputTile(Tile):
         self._show = False
 
     def process(self, msg):
-        return
-
-        if new_state["mode"] == Modes.InputPurpose:
+        if msg.kind == Event.AddPurpose:
             self._show = True
-        elif new_state["mode"] == Modes.ClosePurpose:
-            self._show = False
 
     def refresh(self):
-        return
 
         if self._show:
             msg = "¿Cuál es el objetivo de este pomodoro?" 
+            msg_begin_x = 1
+            msg_begin_y = 2
             self.window.border()
-            self.window.addstr(0,0, msg)
-            purpose = self.window.getstr(0,0,self.width-len(msg)).decode("utf-8")
-            raise RuntimeError("Not implemented")
+            self.window.addstr(1, 1, msg)
+            curses.curs_set(2)
+            curses.echo()
+            self.window.move(1, msg_begin_x)
+            purpose = self.window.getstr(msg_begin_y, msg_begin_x, self.width-(msg_begin_x)).decode("utf-8")
+            curses.curs_set(0)
+            curses.noecho()
+            self._show = False
+            event_purpose_added(_msg_queue, purpose)
+            event_purpose_finished(_msg_queue)
+            event_layout_draw(_msg_queue)
+            self.window.clear()
 
     def draw(self):
         pass
