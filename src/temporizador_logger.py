@@ -113,6 +113,7 @@ class Main:
                     publish_notification(finished_info_msg(self._args))
                     event_playback(self._msg_queue)
                     self._audio_process = play_audio_on_subprocess(self._args, self._config.path_pc, self._msg_queue)
+                    event_stop_stopwatch(self._msg_queue)
 
                 case Event.AudioPomodoroFinished:
                     event_playback(self._msg_queue)
