@@ -90,6 +90,8 @@ class Screen:
         while not self._must_finish:
             self._pool_for_msgs()
             self._refresh_if_have_to()
+            
+        _msg_queue.unsuscribe(getpid(), [event for event in Event])
 
     def _pool_for_msgs(self):
         while self._msgs_pipe.poll():
@@ -107,7 +109,6 @@ class Screen:
 
             for layout in self._layouts:
                 layout.process(msg)
-
 
     def _draw_layout(self):
         for layout in self._layouts:
@@ -331,9 +332,8 @@ class ManualTile(Tile):
         Las opciones de teclas son:
         p   Pausar el temporizador
         c   Continuar con el temporizador
-        f   Finalizar el temporizador
+        f   Finalizar el temporizador ó Detener el sonido de finalización del timer.
         t   Iniciar/detener un stopwatch
-        s   Detener la reproducción del sonido de finalización del timer
         i   Agregar una intención/propósito para la sesión en curso
         """
         return manual
@@ -341,9 +341,8 @@ class ManualTile(Tile):
     def _pomodoro_manual(self):
         manual = """
         Las opciones de teclas son:
-        f   Finalizar el temporizador
+        f   Finalizar el temporizador ó Detener el sonido de finalización del timer.
         t   Iniciar/detener un stopwatch
-        s   Detener la reproducción del sonido de finalización del timer
         i   Agregar una intención/propósito para la sesión en curso
         """
         return manual

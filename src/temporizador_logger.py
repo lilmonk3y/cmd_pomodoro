@@ -39,15 +39,14 @@ class Main:
 
         self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
 
-        self._audio_process = None
-        self._stopwatch = None
-
         self._can_pause = True
         self._paused = False
         self._must_finish = False
         self._in_purpose_add = False
 
-        self._start_printer()
+        self._audio_process = None
+        self._stopwatch_process = None
+        self._printer_process = self._start_printer()
         self._timer_process = self._start_timer()
 
     def run(self):
@@ -63,10 +62,11 @@ class Main:
         self._finish_gracefully()
 
     def _start_printer(self):
-        self.printer_process = multiprocessing.Process(
+        printer_process = multiprocessing.Process(
                     target=printer, 
                     args=(self._msg_queue,))
-        self.printer_process.start()
+        printer_process.start()
+        return printer_process
 
     def _start_timer(self):
         if self._args.cmd == "timer":
@@ -91,7 +91,8 @@ class Main:
                           self._config.pomodoro_time,
                           self._config.pomodoro_break_duration,
                           self._config.path_to_log,
-                          self._msg_queue)) 
+                          self._msg_queue,
+                          self._args.purpose)) 
 
         else:
             raise RuntimeError("Comando {} desconocido")
@@ -171,26 +172,24 @@ class Main:
 
             case "f":
                 print_cmd_msg(self._msg_queue,"f")
-                event_terminate(self._msg_queue)
+                if self._audio_process:
+                    event_audio_terminate(self._msg_queue)
+                    self._audio_process.join()
+                else:
+                    event_terminate(self._msg_queue)
             
             case "t":
                 print_cmd_msg(self._msg_queue,"t")
-                if self._stopwatch:
+                if self._stopwatch_process:
                     event_stop_stopwatch(self._msg_queue)
-                    self._stopwatch.join()
-                    self._stopwatch = None
+                    self._stopwatch_process.join()
+                    self._stopwatch_process = None
                 else:
-                    self._stopwatch = multiprocessing.Process(
+                    self._stopwatch_process = multiprocessing.Process(
                         target=stopwatch_process, 
                         args=(self._msg_queue,))
-                    self._stopwatch.start()
+                    self._stopwatch_process.start()
             
-            case "s":
-                if self._audio_process:
-                    print_cmd_msg(self._msg_queue,"s")
-                    event_audio_terminate(self._msg_queue)
-                    self._audio_process.join()
-
             case "i":
                 event_add_purpose(self._msg_queue)
                 self._in_purpose_add = True
@@ -204,25 +203,25 @@ class Main:
     def _finish_gracefully(self):
         self._timer_process.join()
 
-        if self._stopwatch:
-            self._stopwatch.join()
+        if self._stopwatch_process:
+            self._stopwatch_process.join()
 
         if self._audio_process:
             self._audio_process.join()
 
         event_stop_printer(self._msg_queue)
-        self.printer_process.join()
+        self._printer_process.join()
 
         self._msg_queue.unsuscribe(getpid(), [event for event in Event])
 
     def _finish_unsuccessfully(self):
         #event_terminate(self._msg_queue)
 
-        self.printer_process.terminate()
+        self._printer_process.terminate()
         self._timer_process.terminate()
 
-        if self._stopwatch:
-            self._stopwatch.terminate()
+        if self._stopwatch_process:
+            self._stopwatch_process.terminate()
 
         if self._audio_process:
             self._audio_process.terminate()

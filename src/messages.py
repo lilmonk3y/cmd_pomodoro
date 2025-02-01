@@ -1,4 +1,3 @@
-from abc import abstractmethod, ABC
 from enum import auto, Enum
 from dataclasses import dataclass
 import logging
@@ -52,6 +51,7 @@ class EventBroker:
 
         self._msg_queue = queue.Queue()
         self._event_consumers = {event:[] for event in Event}
+        self._msgs = []
 
     def suscribe(self, *events, suscriber):
         (ours, theirs) = Pipe()
@@ -62,14 +62,14 @@ class EventBroker:
             else:
                 raise RuntimeError("Event {} is not a valid event".format(event))
 
+        self._publish_previous_msgs(ours, suscriber, events)
         return theirs
 
     def publish(self, msg: EventMsg):
-        #assert self._event_consumers[msg.kind], "Tengo al menos un consumidor para el mensaje msg"
+        self._msgs.append(msg)
 
-        for consumer, _ in self._event_consumers[msg.kind]:
-            consumer.send(msg)
-            self._logger.info("Process {} has a new msg in it's pipe. msg: {}".format(getpid(), msg))
+        for consumer, consumer_id in self._event_consumers[msg.kind]:
+            self._publish_msg_to_consumer(msg, consumer, consumer_id)
 
     def unsuscribe(self, suscriber_id, event_list):
         for event in event_list:
@@ -77,6 +77,14 @@ class EventBroker:
                 if theirs_id == suscriber_id:
                     self._event_consumers[event].pop(index)
                     self._logger.info("deleted consumer {} from event {}".format(suscriber_id, event))
+
+    def _publish_previous_msgs(self, topic, consumer_id, events):
+        for msg in filter(lambda msg: msg.kind in events, self._msgs):
+            self._publish_msg_to_consumer(msg, topic, consumer_id)
+
+    def _publish_msg_to_consumer(self, msg, consumer, consumer_id):
+        consumer.send(msg)
+        self._logger.info("Process {} has a new msg in it's pipe. msg: {}".format(consumer_id, msg))
 
 def print_time(msg_queue, time):
     _send(msg_queue, EventMsg(Event.TimeChange, time))

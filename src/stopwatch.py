@@ -23,6 +23,7 @@ class Stopwatch:
             sleep(1)
 
         print_app_msg(self._msg_queue,"Temporizador duro: {}".format(stopwach_msg(self._seconds)))
+        self._msg_queue.unsuscribe(getpid(),[Event.Termination,Event.StopStopwatch])
 
 
     def _poll_msgs(self):

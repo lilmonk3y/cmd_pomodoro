@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from utils import path_to_file, file_path_in_home
 from global_data import TEMPORARY_PATH
-from messages import event_audio_stopped, event_audio_ended, Event
+from messages import *
 
 def audio_process(args, audio_path, msg_queue):
     """audio - play audio on background"""

@@ -34,7 +34,7 @@ class Pomodoro:
                  pomodoro_break_duration,
                  purpose):
         self._msg_queue=msg_queue
-        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
+        self._pipe = msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
@@ -48,16 +48,16 @@ class Pomodoro:
         self._on_break = False
 
     def run(self):
-        self._set_pomodoro()
-
         while self._wait_printer:
-            self._poll_msg_queue_pipe()
+            self._poll_pipe()
+
+        self._set_pomodoro()
 
         while 0 != self._pomodoros: 
             self._poll_pipe()
 
             if self._must_exit:
-                return
+                break
 
             self._print_seconds_to_screen()
             
@@ -81,13 +81,6 @@ class Pomodoro:
         self._msg_queue.unsuscribe(getpid(), [event for event in Event])
         event_timer_finished(self._msg_queue)
     
-    def _poll_msg_queue_pipe(self):
-        if self._msg_queue_pipe.poll():
-            msg = self._msg_queue_pipe.recv()
-            match msg.kind:
-                case Event.PrinterReady:
-                    self._wait_printer = False
-
     def _set_pomodoro(self):
         self._on_break = False
         self._seconds = self._pomodoro_time * 60
@@ -100,9 +93,12 @@ class Pomodoro:
         event_break_begin(self._msg_queue)
 
     def _poll_pipe(self):
-        if self._msg_queue_pipe.poll():
-            msg = self._msg_queue_pipe.recv()
+        while self._pipe.poll():
+            msg = self._pipe.recv()
             match msg.kind:
+                case Event.PrinterReady:
+                    self._wait_printer = False
+
                 case Event.StopTimer:
                     self._paused = True
                     event_timer_stopped(self._msg_queue)
@@ -118,7 +114,6 @@ class Pomodoro:
 
                 case Event.PurposeAdded:
                     self._purpose = msg.msg
-
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())
@@ -152,7 +147,7 @@ class Timer:
                  purpose):
         self._seconds=minutes_count*60
         self._msg_queue=msg_queue
-        self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
+        self._pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
         self._pomodoro_time=pomodoro_time
         self._log_file=log_file
         self._tag=tag
@@ -165,7 +160,7 @@ class Timer:
 
     def run(self):
         while self._wait_printer:
-            self._poll_msg_queue_pipe()
+            self._poll_pipe()
 
         while 0 <= self._seconds: 
             self._poll_pipe()
@@ -195,18 +190,14 @@ class Timer:
         self._msg_queue.unsuscribe(getpid(), [event for event in Event])
         event_timer_finished(self._msg_queue)
 
-    def _poll_msg_queue_pipe(self):
-        if self._msg_queue_pipe.poll():
-            msg = self._msg_queue_pipe.recv()
+    def _poll_pipe(self):
+        while self._pipe.poll():
+            msg = self._pipe.recv()
+            
             match msg.kind:
                 case Event.PrinterReady:
                     self._wait_printer = False
 
-    def _poll_pipe(self):
-        if self._msg_queue_pipe.poll():
-            msg = self._msg_queue_pipe.recv()
-            
-            match msg.kind:
                 case Event.StopTimer:
                     self._paused = True
                     event_timer_stopped(self._msg_queue)
