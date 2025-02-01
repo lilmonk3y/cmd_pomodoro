@@ -14,24 +14,26 @@ class Event(Enum):
     Termination = auto()
     AudioPlayback = auto()
     AudioStopped = auto()
-    Stopped = auto()
-    Resumed = auto()
     PomodoroBegin = auto()
     BreakBegin = auto()
     BreakFinished = auto()
     PomodoroInit = auto()
-    TimerInit = auto()
     PrinterReady = auto()
     AudioPomodoroFinished = auto()
+    TimerInit = auto()
+    TimerResumed = auto()
     TimerStopped = auto()
     TimerFinished = auto()
     AudioEnded = auto()
+    ResumeTimer = auto()
     StopTimer = auto()
     AudioTerminate = auto()
     AddPurpose = auto()
     PurposeFinished = auto()
     PurposeAdded = auto()
     LayoutDraw = auto()
+    StopStopwatch = auto()
+    StopPrinter = auto()
 
 @dataclass(frozen=True)
 class EventMsg():
@@ -94,14 +96,14 @@ def event_playback(msg_queue):
 def event_audio_stopped(msg_queue):
     _send(msg_queue, EventMsg(Event.AudioStopped))
 
-def event_stopped(msg_queue):
-    _send(msg_queue, EventMsg(Event.Stopped))
-
-def event_resumed(msg_queue):
-    _send(msg_queue, EventMsg(Event.Resumed))
-
 def event_timer_init(msg_queue):
     _send(msg_queue, EventMsg(Event.TimerInit))
+
+def event_timer_stopped(msg_queue):
+    _send(msg_queue, EventMsg(Event.TimerStopped))
+
+def event_timer_resumed(msg_queue):
+    _send(msg_queue, EventMsg(Event.TimerResumed))
 
 def event_pomodoro_init(msg_queue):
     _send(msg_queue, EventMsg(Event.PomodoroInit))
@@ -121,14 +123,14 @@ def event_printer_ready(msg_queue):
 def event_audio_pomodoro_finished(msg_queue):
     _send(msg_queue, EventMsg(Event.AudioPomodoroFinished))
 
-def event_timer_stopped(msg_queue):
-    _send(msg_queue, EventMsg(Event.TimerStopped))
-
 def event_timer_finished(msg_queue):
     _send(msg_queue, EventMsg(Event.TimerFinished))
 
 def event_audio_ended(msg_queue):
     _send(msg_queue, EventMsg(Event.AudioEnded))
+
+def event_resume_timer(msg_queue):
+    _send(msg_queue, EventMsg(Event.ResumeTimer))
 
 def event_stop_timer(msg_queue):
     _send(msg_queue, EventMsg(Event.StopTimer))
@@ -147,6 +149,12 @@ def event_purpose_finished(msg_queue):
 
 def event_layout_draw(msg_queue):
     _send(msg_queue, EventMsg(Event.LayoutDraw))
+
+def event_stop_stopwatch(msg_queue):
+    _send(msg_queue, EventMsg(Event.StopStopwatch))
+
+def event_stop_printer(msg_queue):
+    _send(msg_queue, EventMsg(Event.StopPrinter))
 
 def _send(msg_queue, msg: EventMsg):
     logger = logging.getLogger(".messages")

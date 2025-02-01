@@ -97,7 +97,7 @@ class Screen:
 
             self._logger.info("Printer is consuming msg {}".format(msg))
 
-            if msg.kind == Event.Termination:
+            if msg.kind == Event.StopPrinter:
                 self._must_finish = True
                 _msg_queue.unsuscribe(getpid(), [event for event in Event])
                 return
@@ -194,13 +194,13 @@ class TimerTile(Tile):
             case Event.TimeChange:
                 self._time = msg.msg
 
-            case Event.Stopped:
+            case Event.TimerStopped:
                 self._text_effect = BlinkTextEffect()
 
             case Event.AudioPlayback:
                 self._text_effect = SlideTextEffect()
 
-            case Event.AudioStopped | Event.Resumed | Event.PomodoroBegin:
+            case Event.AudioStopped | Event.TimerResumed | Event.PomodoroBegin:
                 self._text_effect = NoneTextEffect()
 
             case Event.BreakBegin:
@@ -334,6 +334,7 @@ class ManualTile(Tile):
         f   Finalizar el temporizador
         t   Iniciar/detener un stopwatch
         s   Detener la reproducción del sonido de finalización del timer
+        i   Agregar una intención/propósito para la sesión en curso
         """
         return manual
 
@@ -343,6 +344,7 @@ class ManualTile(Tile):
         f   Finalizar el temporizador
         t   Iniciar/detener un stopwatch
         s   Detener la reproducción del sonido de finalización del timer
+        i   Agregar una intención/propósito para la sesión en curso
         """
         return manual
 

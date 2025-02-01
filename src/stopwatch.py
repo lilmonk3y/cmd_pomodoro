@@ -1,29 +1,39 @@
-import time
-import signal
 import math
+from os import getpid
+from time import sleep
 
-from messages import print_app_msg
+from messages import print_app_msg, Event
 
 def stopwatch(msg_queue):
-    signal_handler = StopwatchSignalHandler()
-    
-    print_app_msg(msg_queue,"Temporizador iniciado")
+    (Stopwatch(msg_queue)).run()
 
-    while signal_handler.KEEP_PROCESSING:
-        time.sleep(1)
-        signal_handler.SECONDS_COUNT += 1
+class Stopwatch:
+    def __init__(self, msg_queue):
+        self._seconds = 0
+        self._must_exit = False
+        self._msg_queue = msg_queue
+        self._pipe = msg_queue.suscribe(Event.Termination, Event.StopStopwatch, suscriber=getpid())
 
-    print_app_msg(msg_queue,"Temporizador duro: {}".format(stopwach_msg(signal_handler.SECONDS_COUNT)))
+    def run(self):
+        print_app_msg(self._msg_queue,"Temporizador iniciado")
+
+        while not self._must_exit:
+            self._poll_msgs()
+            self._seconds += 1
+            sleep(1)
+
+        print_app_msg(self._msg_queue,"Temporizador duro: {}".format(stopwach_msg(self._seconds)))
+
+
+    def _poll_msgs(self):
+        while self._pipe.poll():
+            msg = self._pipe.recv()
+            match msg.kind:
+                case Event.Termination | Event.StopStopwatch:
+                    self._must_exit = True
 
 def stopwach_msg(seconds):
     minutes = math.ceil(seconds/60)
     return f"{minutes} minutos" if minutes != 1 else f"{minutes} minuto"
-    
-class StopwatchSignalHandler:
-    KEEP_PROCESSING = True
-    SECONDS_COUNT = 0
-    def __init__(self):
-        signal.signal(signal.SIGTERM, self.exit_gracefully)
 
-    def exit_gracefully(self, signum, frame):
-        self.KEEP_PROCESSING = False
+

@@ -2,9 +2,7 @@ from datetime import datetime
 import time
 from os import getpid
 
-from messages import Event, print_time, print_app_msg, event_pomodoro_begin, event_timer_stopped
-from messages import event_break_begin, event_break_finished, event_audio_pomodoro_finished
-from messages import event_timer_finished
+from messages import *
 from utils import path_to_file
 
 def timer(minutes_count, tag, log_file, pomodoro_time, msg_queue, purpose):
@@ -105,13 +103,22 @@ class Pomodoro:
         if self._msg_queue_pipe.poll():
             msg = self._msg_queue_pipe.recv()
             match msg.kind:
-                case Event.Stopped:
-                    self._paused = True
-                case Event.Resumed:
-                    self._paused = False
                 case Event.StopTimer:
+                    self._paused = True
                     event_timer_stopped(self._msg_queue)
+                    print_app_msg(self._msg_queue,"Cuenta atrás pausada.")
+
+                case Event.ResumeTimer:
+                    self._paused = False
+                    event_timer_resumed(self._msg_queue)
+                    print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
+
+                case Event.Termination:
                     self._must_exit = True
+
+                case Event.PurposeAdded:
+                    self._purpose = msg.msg
+
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())
@@ -200,14 +207,17 @@ class Timer:
             msg = self._msg_queue_pipe.recv()
             
             match msg.kind:
-                case Event.TimerStopped:
+                case Event.StopTimer:
                     self._paused = True
+                    event_timer_stopped(self._msg_queue)
+                    print_app_msg(self._msg_queue,"Cuenta atrás pausada.")
 
-                case Event.Resumed:
+                case Event.ResumeTimer:
                     self._paused = False
+                    event_timer_resumed(self._msg_queue)
+                    print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
 
                 case Event.Termination:
-                    event_timer_stopped(self._msg_queue)
                     self._must_exit = True
 
                 case Event.PurposeAdded:

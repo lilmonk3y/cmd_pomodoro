@@ -104,14 +104,14 @@ class Main:
         while self._msg_queue_pipe.poll():
             msg = self._msg_queue_pipe.recv()
             match msg.kind:
+                case Event.Termination:
+                    print_app_msg(self._msg_queue, "Relog apagado")
+                    self._must_finish = True
+
                 case Event.TimerFinished:
                     publish_notification(finished_info_msg(self._args))
                     event_playback(self._msg_queue)
                     self._audio_process = play_audio_on_subprocess(self._args, self._config.path_pc, self._msg_queue)
-
-                case Event.TimerStopped:
-                    print_app_msg(self._msg_queue, "Relog apagado")
-                    self._must_finish = True
 
                 case Event.AudioPomodoroFinished:
                     event_playback(self._msg_queue)
@@ -134,8 +134,9 @@ class Main:
                 case Event.AudioEnded:
                     event_audio_stopped(self._msg_queue)
                     print_app_msg(self._msg_queue, "Felicitaciones por el período de estudio! Te mereces un descanso.")
-                    time.sleep(2)
+                    event_terminate(self._msg_queue)
                     self._must_finish = True
+                    time.sleep(2)
 
                 case Event.PurposeFinished:
                     self._in_purpose_add = False
@@ -158,8 +159,7 @@ class Main:
 
                 self._paused = True
                 print_cmd_msg(self._msg_queue,"p")
-                event_stopped(self._msg_queue)
-                print_app_msg(self._msg_queue,"Cuenta atrás pausada.")
+                event_stop_timer(self._msg_queue)
 
             case "c":
                 if not self._paused:
@@ -167,17 +167,16 @@ class Main:
 
                 self._paused = False
                 print_cmd_msg(self._msg_queue,"c")
-                event_resumed(self._msg_queue)
-                print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
+                event_resume_timer(self._msg_queue)
 
             case "f":
                 print_cmd_msg(self._msg_queue,"f")
-                event_stop_timer(self._msg_queue)
+                event_terminate(self._msg_queue)
             
             case "t":
                 print_cmd_msg(self._msg_queue,"t")
                 if self._stopwatch:
-                    self._stopwatch.terminate()
+                    event_stop_stopwatch(self._msg_queue)
                     self._stopwatch.join()
                     self._stopwatch = None
                 else:
@@ -203,23 +202,24 @@ class Main:
         return not self._in_purpose_add
 
     def _finish_gracefully(self):
-        event_terminate(self._msg_queue)
+        self._timer_process.join()
 
         if self._stopwatch:
-            self._stopwatch.terminate()
             self._stopwatch.join()
-
-        self._timer_process.join()
 
         if self._audio_process:
             self._audio_process.join()
 
+        event_stop_printer(self._msg_queue)
         self.printer_process.join()
+
         self._msg_queue.unsuscribe(getpid(), [event for event in Event])
 
     def _finish_unsuccessfully(self):
-        event_stop_timer(self._msg_queue)
-        event_terminate(self._msg_queue)
+        #event_terminate(self._msg_queue)
+
+        self.printer_process.terminate()
+        self._timer_process.terminate()
 
         if self._stopwatch:
             self._stopwatch.terminate()
@@ -227,9 +227,7 @@ class Main:
         if self._audio_process:
             self._audio_process.terminate()
 
-        self.printer_process.terminate()
         self._msg_queue.unsuscribe(getpid(), [event for event in Event])
-
 
 def get_key():
     """Lee una tecla de manera no bloqueante."""
