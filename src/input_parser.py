@@ -56,10 +56,13 @@ def process_config(args, file="config.ini"):
 
     if args.tag_add:
         tags = config_object.getlist(env, "tags") if config_object.has_option(env, "tags") else []
+        tags_modified = False
         for tag in args.tag_add.split(','):
             if tag not in tags:
                 tags.append(tag)
-        config_object[env]["tags"] = write_list(tags)
+                tags_modified = True
+        if tags_modified:
+            config_object[env]["tags"] = write_list(tags)
 
     if args.tag_delete:
         tags = config_object.getlist(env, "tags") if config_object.has_option(env, "tags") else []
@@ -216,13 +219,14 @@ def _build_config(config_map):
         raise RuntimeError("There are missing keys in the config file. Expected keys: {}. Actual keys: {}".format(field_keys, keys))
 
     return Config(
-            pomodoro_time= int(config_map["pomodoro_time"]),
-            pomodoro_break_duration= int(config_map["pomodoro_break_duration"]),
+            pomodoro_time= config_map.getint("pomodoro_time"),
+            pomodoro_break_duration= config_map.getint("pomodoro_break_duration"),
             path_pc= config_map["path_pc"],
             between_pomodoros_sound= config_map["between_pomodoros_sound"],
             audio_pomodoro_break_finish= config_map["audio_pomodoro_break_finish"],
             path_to_log= config_map["path_to_log"],
-            can_pause_pomodoros= bool(config_map["can_pause_pomodoros"])
+            can_pause_pomodoros= config_map.getboolean("can_pause_pomodoros"),
+            tags= config_map.getlist("tags")
             )
 
 @dc.dataclass(frozen=True)
@@ -234,3 +238,4 @@ class Config:
     audio_pomodoro_break_finish : str
     path_to_log : str
     can_pause_pomodoros : bool
+    tags : list[str]

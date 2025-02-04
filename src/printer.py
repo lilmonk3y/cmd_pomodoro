@@ -9,10 +9,10 @@ from os import getpid
 
 from messages import *
 
-def printer(msg_queue):
-    curses.wrapper(printer_display, msg_queue)
+def printer(msg_queue, tags):
+    curses.wrapper(printer_display, msg_queue, tags)
 
-def printer_display(stdscr, msg_queue):
+def printer_display(stdscr, msg_queue, tags):
     global _msg_queue 
     _msg_queue = msg_queue
 
@@ -27,7 +27,8 @@ def printer_display(stdscr, msg_queue):
 
     (Screen(
         build_main_layout(height,width),
-        build_input_layout(height,width)
+        build_input_layout(height,width),
+        build_tag_input_layout(height,width,tags)
      )).run()
 
 def build_main_layout(height,width):
@@ -69,10 +70,23 @@ def build_input_layout(height, width):
     window = curses.newwin(win_height, win_width, height//3, width//3)
 
     return Layout(
-            InputTile(
+            PurposeInputTile(
                 window=window,
                 width=win_width,
                 height=win_height))
+
+def build_tag_input_layout(height, width, tags):
+    win_height = height // 3
+    win_width = width // 3
+    
+    window = curses.newwin(win_height, win_width, height//3, width//3)
+
+    return Layout(
+            TagInputTile(
+                window=window,
+                width=win_width,
+                height=win_height,
+                tags=tags))
 
 class Screen:
     def __init__(self, *layouts):
@@ -335,6 +349,7 @@ class ManualTile(Tile):
         f   Finalizar el temporizador ó Detener el sonido de finalización del timer.
         t   Iniciar/detener un stopwatch
         i   Agregar una intención/propósito para la sesión en curso
+        r   Cambiar el tag actual
         """
         return manual
 
@@ -344,10 +359,11 @@ class ManualTile(Tile):
         f   Finalizar el temporizador ó Detener el sonido de finalización del timer.
         t   Iniciar/detener un stopwatch
         i   Agregar una intención/propósito para la sesión en curso
+        r   Cambiar el tag actual
         """
         return manual
 
-class InputTile(Tile):
+class PurposeInputTile(Tile):
     def __init__(self, window, width , height):
         super().__init__(window,width,height)
 
@@ -358,9 +374,8 @@ class InputTile(Tile):
             self._show = True
 
     def refresh(self):
-
         if self._show:
-            msg = "¿Cuál es el objetivo de este pomodoro?" 
+            msg = " ¿Cuál es el objetivo de este pomodoro? " 
             msg_begin_x = 1
             msg_begin_y = 2
             self.window.border()
@@ -379,6 +394,81 @@ class InputTile(Tile):
 
     def draw(self):
         pass
+
+class TagInputTile(Tile):
+    def __init__(self, window, width , height, tags):
+        super().__init__(window,width,height)
+        self.window.keypad(True)
+
+        self._show = False
+
+        self._no_tag = ">Sin tag<"
+        tags.append(self._no_tag)
+        self._tags = tags
+
+    def process(self, msg):
+        if msg.kind == Event.TagChange:
+            self._show = True
+
+    def refresh(self):
+        if self._show:
+
+            selected = self._show_list_menu()
+
+            self._show = False
+            tag = self._tags[selected] if self._tags[selected] != self._no_tag else None
+            event_tag_changed(_msg_queue, tag)
+            event_tag_finished(_msg_queue)
+            event_layout_draw(_msg_queue)
+            self.window.clear()
+
+    def draw(self):
+        pass
+
+    def _show_list_menu(self):
+        menu_items = self._tags
+        selected_idx = 0
+        self.window.clear()
+        msg = " ¿A qué tag querés cambiar? " 
+        self.window.border()
+        self.window.addstr(0, 2, msg)
+        h = self.height
+        w = self.width
+
+        while True:
+            # Mostrar opciones y resaltar la seleccionada
+            for i, item in enumerate(menu_items):
+                x = w // 2 - len(item) // 2
+                y = h // 2 - len(menu_items) // 2 + i
+
+                if i == selected_idx:
+                    self.window.attron(curses.A_REVERSE)  # Resalta la opción
+                    self.window.addstr(y, x, item)
+                    self.window.attroff(curses.A_REVERSE)
+                else:
+                    self.window.addstr(y, x, item)
+
+            self.window.refresh()
+
+            # Capturar entrada del usuario
+            key = self.window.getch()
+
+            if key == curses.KEY_UP and selected_idx > 0:
+                selected_idx -= 1
+            elif key == curses.KEY_DOWN and selected_idx < len(menu_items) - 1:
+                selected_idx += 1
+            elif key == ord("\n"):  # Enter para seleccionar
+                self.window.clear()
+                option_msg = f"Seleccionaste: {menu_items[selected_idx]}"
+                self.window.addstr(h // 2, w // 2 - len(option_msg) // 2, option_msg)
+                self.window.border()
+                self.window.addstr(0, 2, msg)
+                self.window.refresh()
+
+                self.window.getch()  # Esperar input antes de volver al menú
+                break
+
+        return selected_idx
 
 class TextEffect(ABC):
     @abstractmethod

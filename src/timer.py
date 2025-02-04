@@ -46,6 +46,7 @@ class Pomodoro:
         self._wait_printer = True
         self._must_exit = False
         self._on_break = False
+        self._paused = False
 
     def run(self):
         while self._wait_printer:
@@ -58,6 +59,9 @@ class Pomodoro:
 
             if self._must_exit:
                 break
+            
+            if self._paused:
+                continue
 
             self._print_seconds_to_screen()
             
@@ -114,6 +118,9 @@ class Pomodoro:
 
                 case Event.PurposeAdded:
                     self._purpose = msg.msg
+
+                case Event.TagChanged:
+                    self._tag = msg.msg
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())
@@ -213,6 +220,9 @@ class Timer:
 
                 case Event.PurposeAdded:
                     self._purpose = msg.msg
+
+                case Event.TagChanged:
+                    self._tag = msg.msg
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())

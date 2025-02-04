@@ -11,7 +11,7 @@ from printer import printer
 from stopwatch import stopwatch as stopwatch_process
 from timer import timer, pomodoro
 from process_audio import audio_process, audio_process_short
-from utils import file_path_in_home 
+from utils import file_path_in_home, verify_config_and_args 
 from messages import *
 from global_data import TEMPORARY_PATH 
 from input_parser import read_input, must_config, process_config, load_config_from_file
@@ -25,6 +25,8 @@ def main():
         return
 
     config = load_config_from_file(args=args)
+
+    verify_config_and_args(args, config)
 
     EventBrokerManager.register("EventBroker", EventBroker)
     with EventBrokerManager() as manager:
@@ -42,7 +44,7 @@ class Main:
         self._can_pause = config.can_pause_pomodoros
         self._paused = False
         self._must_finish = False
-        self._in_purpose_add = False
+        self._in_input_state = False
 
         self._audio_process = None
         self._stopwatch_process = None
@@ -64,7 +66,7 @@ class Main:
     def _start_printer(self):
         printer_process = multiprocessing.Process(
                     target=printer, 
-                    args=(self._msg_queue,))
+                    args=(self._msg_queue,self._config.tags))
         printer_process.start()
         return printer_process
 
@@ -139,8 +141,8 @@ class Main:
                     self._must_finish = True
                     time.sleep(2)
 
-                case Event.PurposeFinished:
-                    self._in_purpose_add = False
+                case Event.PurposeFinished | Event.TagFinished:
+                    self._in_input_state = False
 
                 case _:
                     pass
@@ -192,13 +194,17 @@ class Main:
             
             case "i":
                 event_add_purpose(self._msg_queue)
-                self._in_purpose_add = True
+                self._in_input_state = True
+
+            case "r":
+                event_tag_change(self._msg_queue)
+                self._in_input_state = True
             
             case _:
                 pass
 
     def _get_input_keys(self):
-        return not self._in_purpose_add
+        return not self._in_input_state
 
     def _finish_gracefully(self):
         self._timer_process.join()

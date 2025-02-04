@@ -33,6 +33,9 @@ class Event(Enum):
     LayoutDraw = auto()
     StopStopwatch = auto()
     StopPrinter = auto()
+    TagChange = auto()
+    TagChanged = auto()
+    TagFinished = auto()
 
 @dataclass(frozen=True)
 class EventMsg():
@@ -163,6 +166,15 @@ def event_stop_stopwatch(msg_queue):
 
 def event_stop_printer(msg_queue):
     _send(msg_queue, EventMsg(Event.StopPrinter))
+
+def event_tag_change(msg_queue):
+    _send(msg_queue, EventMsg(Event.TagChange))
+
+def event_tag_changed(msg_queue, tag):
+    _send(msg_queue, EventMsg(Event.TagChanged, tag))
+
+def event_tag_finished(msg_queue):
+    _send(msg_queue, EventMsg(Event.TagFinished))
 
 def _send(msg_queue, msg: EventMsg):
     logger = logging.getLogger(".messages")
