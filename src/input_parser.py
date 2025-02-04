@@ -54,6 +54,19 @@ def process_config(args, file="config.ini"):
         can_pause_pomodoros = args.can_pause_pomodoros == "Y" 
         config_object[env]["can_pause_pomodoros"] = str(can_pause_pomodoros)
 
+    if args.tag_add:
+        tags = config_object.getlist(env, "tags") if config_object.has_option(env, "tags") else []
+        for tag in args.tag_add.split(','):
+            if tag not in tags:
+                tags.append(tag)
+        config_object[env]["tags"] = write_list(tags)
+
+    if args.tag_delete:
+        tags = config_object.getlist(env, "tags") if config_object.has_option(env, "tags") else []
+        if args.tag_delete in tags:
+            tags = [tag for tag in tags if tag != args.tag_delete]
+            config_object[env]["tags"] = write_list(tags)
+
     path_to_config_file = file_path_in_home(CONFIGURATION_PATH,file)
 
     with open(path_to_config_file, 'w') as conf: 
@@ -157,6 +170,14 @@ def _build_parser():
             metavar="can_pause_pomodoros",
             help="Indica si los pomodoros pueden ser pausados una vez comenzados. Los valores para esta opción son 'Y' o 'N'.")
     config_parser.add_argument(
+            "-tag_add", 
+            type=str, 
+            help="Un nuevo tag para la lista de tags válidos.")
+    config_parser.add_argument(
+            "-tag_delete", 
+            type=str, 
+            help="Un tag que se debe eliminar de la lista de tags válidos.")
+    config_parser.add_argument(
             "--show", 
             action="store_true", 
             default=False,
@@ -173,10 +194,19 @@ def name_in_environment(file_name, env):
 def _read_config_file(args, file):
     file = file_path_in_home(CONFIGURATION_PATH, file)    
 
-    config = ConfigParser()
+    config = ConfigParser(
+        converters={
+            'list': read_list
+        }) # allow getlist on config file
     config.read(file)
 
     return config
+
+def read_list(string):
+    return [i.strip() for i in string.split(',')] if len(string) > 0 else []
+
+def write_list(list):
+    return ','.join(list)
 
 def _build_config(config_map):
     fields = dc.fields(Config)
