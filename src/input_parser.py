@@ -54,8 +54,15 @@ def process_config(args, file="config.ini"):
         can_pause_pomodoros = args.can_pause_pomodoros == "Y" 
         config_object[env]["can_pause_pomodoros"] = str(can_pause_pomodoros)
 
-    with open(file_path_in_home(CONFIGURATION_PATH,file), 'w') as conf: 
+    path_to_config_file = file_path_in_home(CONFIGURATION_PATH,file)
+
+    with open(path_to_config_file, 'w') as conf: 
         config_object.write(conf)
+
+    if args.show:
+        with open(path_to_config_file, 'r') as f:
+            content = f.read()
+            print(content)
 
 def _build_parser():
     parser = argparse.ArgumentParser(
@@ -149,6 +156,11 @@ def _build_parser():
             type=str, 
             metavar="can_pause_pomodoros",
             help="Indica si los pomodoros pueden ser pausados una vez comenzados. Los valores para esta opción son 'Y' o 'N'.")
+    config_parser.add_argument(
+            "--show", 
+            action="store_true", 
+            default=False,
+            help="Imprime el contenido del archivo de configuración luego de haber corrido las actualizaciones correspondientes.")
     
     return parser
 
