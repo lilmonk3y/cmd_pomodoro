@@ -25,6 +25,7 @@ def process_config(args, file="config.ini"):
     config_object = _read_config_file(args,file)
 
     env = "test" if args.test else "production"
+
     if env not in config_object:
         config_object.add_section(env)
 
@@ -48,6 +49,10 @@ def process_config(args, file="config.ini"):
 
     if args.log_file:
         config_object[env]["path_to_log"] = args.log_file
+
+    if args.can_pause_pomodoros:
+        can_pause_pomodoros = args.can_pause_pomodoros == "Y" 
+        config_object[env]["can_pause_pomodoros"] = str(can_pause_pomodoros)
 
     with open(file_path_in_home(CONFIGURATION_PATH,file), 'w') as conf: 
         config_object.write(conf)
@@ -139,6 +144,11 @@ def _build_parser():
             type=str, 
             metavar="file",
             help="Archivo donde se anotarán los pomodoros terminados. Debe ser un path absoluto al archivo.")
+    config_parser.add_argument(
+            "-can_pause_pomodoros", 
+            type=str, 
+            metavar="can_pause_pomodoros",
+            help="Indica si los pomodoros pueden ser pausados una vez comenzados. Los valores para esta opción son 'Y' o 'N'.")
     
     return parser
 
@@ -169,7 +179,8 @@ def _build_config(config_map):
             path_pc= config_map["path_pc"],
             between_pomodoros_sound= config_map["between_pomodoros_sound"],
             audio_pomodoro_break_finish= config_map["audio_pomodoro_break_finish"],
-            path_to_log= config_map["path_to_log"]
+            path_to_log= config_map["path_to_log"],
+            can_pause_pomodoros= bool(config_map["can_pause_pomodoros"])
             )
 
 @dc.dataclass(frozen=True)
@@ -180,3 +191,4 @@ class Config:
     between_pomodoros_sound : str
     audio_pomodoro_break_finish : str
     path_to_log : str
+    can_pause_pomodoros : bool

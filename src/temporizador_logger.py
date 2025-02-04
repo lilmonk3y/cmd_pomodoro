@@ -39,7 +39,7 @@ class Main:
 
         self._msg_queue_pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
 
-        self._can_pause = True
+        self._can_pause = config.can_pause_pomodoros
         self._paused = False
         self._must_finish = False
         self._in_purpose_add = False
@@ -83,7 +83,6 @@ class Main:
 
         elif self._args.cmd == "pomodoro":
             event_pomodoro_init(self._msg_queue)
-            self._can_pause = False
             timer_process = multiprocessing.Process(
                     target=pomodoro,
                     args=(self._args.pomodoros,
