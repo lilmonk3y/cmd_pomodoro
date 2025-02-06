@@ -48,15 +48,15 @@ def build_main_layout(height,width):
     app_messages_width = manual_width
 
     return Layout(
+            StatusBarTile(
+                window=curses.newwin(status_bar_height, status_bar_width, 0, 0),
+                width=status_bar_width,
+                height=status_bar_height),
             TimerTile(
-                window=curses.newwin(timer_height, timer_width, 0, 0),
+                window=curses.newwin(timer_height, timer_width, status_bar_height, 0),
                 width=timer_width,
                 height=timer_height
                 ),
-            StatusBarTile(
-                window=curses.newwin(status_bar_height, status_bar_width, timer_height, 0),
-                width=status_bar_width,
-                height=status_bar_height),
             ManualTile(
                 window=curses.newwin(manual_height, manual_width, height_offset, 0),
                 width=manual_width,
