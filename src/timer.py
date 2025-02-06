@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 from os import getpid
 
@@ -110,7 +110,7 @@ class Pomodoro:
 
                 case Event.ResumeTimer:
                     self._paused = False
-                    event_timer_resumed(self._msg_queue)
+                    event_timer_resumed(self._msg_queue, self._finish_time())
                     print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
 
                 case Event.Termination:
@@ -121,6 +121,10 @@ class Pomodoro:
 
                 case Event.TagChanged:
                     self._tag = msg.msg
+
+    def _finish_time(self):
+        t = datetime.now() + timedelta(seconds=self._seconds)
+        return "{:02d}:{:02d}:{:02d}".format(t.hour, t.minute, t.second)
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())
@@ -165,9 +169,17 @@ class Timer:
         self._paused = False
         self._must_exit = False
 
+        if tag:
+            event_tag_setted(msg_queue,tag)
+        if purpose:
+            event_purpose_setted(msg_queue, purpose)
+        event_pomodoro_setted(msg_queue, minutes_count // pomodoro_time)
+
     def run(self):
         while self._wait_printer:
             self._poll_pipe()
+            
+        event_timer_initiated(self._msg_queue, self._finish_time())
 
         while 0 <= self._seconds: 
             self._poll_pipe()
@@ -184,6 +196,7 @@ class Timer:
                 now = datetime.now()
                 self._log_to_file(now)
                 self._print_pomodoro_finished(now)
+                event_pomodoro_finished(self._msg_queue)
 
                 if 0 < self._seconds:
                     event_audio_pomodoro_finished(self._msg_queue)
@@ -212,7 +225,7 @@ class Timer:
 
                 case Event.ResumeTimer:
                     self._paused = False
-                    event_timer_resumed(self._msg_queue)
+                    event_timer_resumed(self._msg_queue, self._finish_time())
                     print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
 
                 case Event.Termination:
@@ -223,6 +236,10 @@ class Timer:
 
                 case Event.TagChanged:
                     self._tag = msg.msg
+
+    def _finish_time(self):
+        t = datetime.now() + timedelta(seconds=self._seconds)
+        return "{:02d}:{:02d}".format(t.hour, t.minute)
 
     def _print_seconds_to_screen(self):
         print_time(self._msg_queue, self._print_pending_time_msg())

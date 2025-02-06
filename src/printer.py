@@ -2,6 +2,7 @@ from abc import abstractmethod, ABC
 from typing import Any
 from pyfiglet import Figlet
 import curses
+from curses import textpad
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
@@ -33,41 +34,49 @@ def printer_display(stdscr, msg_queue, tags):
 
 def build_main_layout(height,width):
     timer_height = height // 2
+    status_bar_height = 3
     command_input_height = 3
-    manual_height = timer_height
-    app_messages_height = timer_height - command_input_height
+    manual_height = timer_height - status_bar_height
+    app_messages_height = timer_height - command_input_height - status_bar_height
+
+    height_offset = timer_height + status_bar_height
 
     timer_width = width
+    status_bar_width = width
     manual_width = width // 2
     command_input_width = manual_width
     app_messages_width = manual_width
 
     return Layout(
-            CommandInputTile(
-                window=curses.newwin(command_input_height, command_input_width, timer_height, manual_width),
-                width=command_input_width,
-                height=command_input_height
-                ),
-            AppMessagesTile(
-                window=curses.newwin(app_messages_height, app_messages_width, timer_height + command_input_height, manual_width),
-                width=app_messages_width,
-                height=app_messages_height
-                ),
             TimerTile(
                 window=curses.newwin(timer_height, timer_width, 0, 0),
                 width=timer_width,
                 height=timer_height
                 ),
+            StatusBarTile(
+                window=curses.newwin(status_bar_height, status_bar_width, timer_height, 0),
+                width=status_bar_width,
+                height=status_bar_height),
             ManualTile(
-                window=curses.newwin(manual_height, manual_width, timer_height, 0),
+                window=curses.newwin(manual_height, manual_width, height_offset, 0),
                 width=manual_width,
-                height=manual_height))
+                height=manual_height),
+            CommandInputTile(
+                window=curses.newwin(command_input_height, command_input_width, height_offset, manual_width),
+                width=command_input_width,
+                height=command_input_height
+                ),
+            AppMessagesTile(
+                window=curses.newwin(app_messages_height, app_messages_width, height_offset + command_input_height, manual_width),
+                width=app_messages_width,
+                height=app_messages_height)
+    )
 
 def build_input_layout(height, width):
     win_height = height // 3
-    win_width = width // 3
+    win_width = width // 2
     
-    window = curses.newwin(win_height, win_width, height//3, width//3)
+    window = curses.newwin(win_height, win_width, height//3, width//2 //2)
 
     return Layout(
             PurposeInputTile(
@@ -290,9 +299,13 @@ class AppMessagesTile(Tile):
     def refresh(self):
         for index, msg in enumerate(list(reversed(self._app_messages))[:self.height-2]):
             self.window.addstr(index+1,1," " * (self.width - 2))  # Limpiar la línea
-            self.window.addstr(index+1,1,msg)
+            self.window.addstr(index+1,1,self._shortened(msg))
 
         self._refresh()
+    
+    def _shortened(self, text):
+        max_allowed = self.width - 3 - 3 # border offset is 3 and elipsis are also 3
+        return text[:max_allowed] + "..." if len(text) > max_allowed else text
 
 class CommandInputTile(Tile):
     def __init__(self, window, width, height):
@@ -363,6 +376,113 @@ class ManualTile(Tile):
         """
         return manual
 
+class StatusBarTile(Tile):
+    def __init__(self, window, width, height):
+        super().__init__(window, width, height) 
+
+        self._tag = ""
+        self._purpose = ""
+        self._end_time = ""
+        self._pomodoros_done = 0 
+        self._pomodoros_to_complete = "?"
+
+        self._end_time_dirty = True
+        self._SPACE_FOR_EACH = 30
+        self._END_TIME_TITLE = "Hora de fin:"
+        self._POMODOROS_TITLE = "Pomodoros:"
+        self._TAG_TITLE = "tag:"
+        self._PURPOSE_TITLE = "Intención:"
+
+    def draw(self):
+        self.window.clear()
+        self.window.box()
+        self.window.addstr(0, 2, " Status ")
+
+    def process(self, msg) -> None:
+        match msg.kind:
+            case Event.TagChanged | Event.TagSetted:
+                self._tag = msg.msg if msg.msg else ""
+            
+            case Event.PurposeAdded | Event.PurposeSetted:
+                self._purpose = msg.msg
+
+            case Event.TimerResumed | Event.TimerInitiated:
+                self._end_time = msg.msg
+                self._end_time_dirty = False
+
+            case Event.TimerStopped:
+                self._end_time_dirty = True
+
+            case Event.PomodoroSetted:
+                self._pomodoros_to_complete = str(msg.msg)
+
+            case Event.PomodoroFinished:
+                self._pomodoros_done += 1
+
+    def refresh(self):
+        pos_y = 1
+        pos_x = 2
+
+        # End time
+        self.window.addstr(pos_y, pos_x, self._END_TIME_TITLE)
+        action = lambda: self.window.addstr(pos_y, pos_x + len(self._END_TIME_TITLE) + 1, self._end_time)
+        if self._end_time_dirty:
+            self._with_effect(curses.A_DIM, action)
+        else: 
+            action()
+        pos_x += self._SPACE_FOR_EACH
+        
+        # Pomodoros
+        self.window.addstr(pos_y, pos_x, self._POMODOROS_TITLE)
+        pomodoros_text = "{}/{}".format(self._pomodoros_done,self._pomodoros_to_complete)
+        action = lambda: self.window.addstr(pos_y, pos_x + len(self._POMODOROS_TITLE) + 1, pomodoros_text)
+        if str(self._pomodoros_done) == self._pomodoros_to_complete:
+            self._with_effect(curses.A_BLINK,action)
+        else:
+            action()
+        pos_x += self._SPACE_FOR_EACH
+
+        # Tag
+        self.window.addstr(pos_y, pos_x, self._TAG_TITLE)
+        offset = len(self._TAG_TITLE) + 1
+        action = lambda: self.window.addstr(pos_y, pos_x + offset, self._shortened(self._tag, pos_x, offset))
+        self._with_effect(curses.A_STANDOUT, action)
+        pos_x += self._SPACE_FOR_EACH
+        
+        # Purpose
+        self.window.addstr(pos_y, pos_x, self._PURPOSE_TITLE)
+        offset = len(self._PURPOSE_TITLE) + 1
+        self.window.addstr(pos_y, pos_x + offset, self._shortened_last(self._purpose, pos_x, offset))
+        pos_x += self._SPACE_FOR_EACH
+        
+        self._refresh()
+
+    def _shortened(self, text, begin_pos_x, offset):
+        """
+        The text is shortened to be in the range for this section minus 1 unit 
+        for correct spacing with the next title
+        """
+        return text[:self._SPACE_FOR_EACH - offset -1]
+
+    def _shortened_last(self, text, begin_pos_x, offset):
+        """
+        The text is shortened to be in the range for this section minus 1 unit 
+        for correct spacing with the next title
+        """
+        line_width = self.width - 2
+        line_width_available = line_width - begin_pos_x - offset
+        if len(text) > line_width_available - 3:
+            text = text[:line_width_available - 3] + "..."
+
+        return text
+
+    def _with_effect(self, effect, action):
+        self.window.attron(effect)
+
+        action()
+
+        self.window.attroff(effect)
+
 class PurposeInputTile(Tile):
     def __init__(self, window, width , height):
         super().__init__(window,width,height)
@@ -375,17 +495,21 @@ class PurposeInputTile(Tile):
 
     def refresh(self):
         if self._show:
-            msg = " ¿Cuál es el objetivo de este pomodoro? " 
-            msg_begin_x = 1
-            msg_begin_y = 2
+            msg = "¿Cuál es el objetivo de este pomodoro?"
             self.window.border()
-            self.window.addstr(1, 1, msg)
-            curses.curs_set(2)
-            curses.echo()
-            self.window.move(1, msg_begin_x)
-            purpose = self.window.getstr(msg_begin_y, msg_begin_x, self.width-(msg_begin_x)).decode("utf-8")
-            curses.curs_set(0)
-            curses.noecho()
+            self.window.addstr(1, 2, msg)
+            textbox_win = self.window.derwin(self.height-4, self.width-3, 2, 2)
+            textbox = textpad.Textbox(textbox_win)
+            self.window.refresh()
+
+            def validator(ascii_key):
+                ascii_enter = 10
+                if ascii_key == ascii_enter: 
+                    return curses.ascii.BEL
+                return ascii_key
+            purpose = textbox.edit( validator ).strip()
+
+            textbox_win = None
             self._show = False
             event_purpose_added(_msg_queue, purpose)
             event_purpose_finished(_msg_queue)
@@ -458,14 +582,6 @@ class TagInputTile(Tile):
             elif key == curses.KEY_DOWN and selected_idx < len(menu_items) - 1:
                 selected_idx += 1
             elif key == ord("\n"):  # Enter para seleccionar
-                self.window.clear()
-                option_msg = f"Seleccionaste: {menu_items[selected_idx]}"
-                self.window.addstr(h // 2, w // 2 - len(option_msg) // 2, option_msg)
-                self.window.border()
-                self.window.addstr(0, 2, msg)
-                self.window.refresh()
-
-                self.window.getch()  # Esperar input antes de volver al menú
                 break
 
         return selected_idx

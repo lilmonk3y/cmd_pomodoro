@@ -20,9 +20,12 @@ class Event(Enum):
     PrinterReady = auto()
     AudioPomodoroFinished = auto()
     TimerInit = auto()
+    TimerInitiated = auto()
     TimerResumed = auto()
     TimerStopped = auto()
     TimerFinished = auto()
+    PomodoroSetted = auto()
+    PomodoroFinished = auto()
     AudioEnded = auto()
     ResumeTimer = auto()
     StopTimer = auto()
@@ -30,9 +33,11 @@ class Event(Enum):
     AddPurpose = auto()
     PurposeFinished = auto()
     PurposeAdded = auto()
+    PurposeSetted = auto()
     LayoutDraw = auto()
     StopStopwatch = auto()
     StopPrinter = auto()
+    TagSetted = auto()
     TagChange = auto()
     TagChanged = auto()
     TagFinished = auto()
@@ -110,11 +115,20 @@ def event_audio_stopped(msg_queue):
 def event_timer_init(msg_queue):
     _send(msg_queue, EventMsg(Event.TimerInit))
 
+def event_timer_initiated(msg_queue, end_time):
+    _send(msg_queue, EventMsg(Event.TimerInitiated, end_time))
+
 def event_timer_stopped(msg_queue):
     _send(msg_queue, EventMsg(Event.TimerStopped))
 
-def event_timer_resumed(msg_queue):
-    _send(msg_queue, EventMsg(Event.TimerResumed))
+def event_timer_resumed(msg_queue, end_time):
+    _send(msg_queue, EventMsg(Event.TimerResumed, end_time))
+
+def event_pomodoro_setted(msg_queue, pomodoros):
+    _send(msg_queue, EventMsg(Event.PomodoroSetted, pomodoros))
+
+def event_pomodoro_finished(msg_queue):
+    _send(msg_queue, EventMsg(Event.PomodoroFinished))
 
 def event_pomodoro_init(msg_queue):
     _send(msg_queue, EventMsg(Event.PomodoroInit))
@@ -158,6 +172,9 @@ def event_purpose_added(msg_queue, purpose):
 def event_purpose_finished(msg_queue):
     _send(msg_queue, EventMsg(Event.PurposeFinished))
 
+def event_purpose_setted(msg_queue, purpose):
+    _send(msg_queue, EventMsg(Event.PurposeSetted, purpose))
+
 def event_layout_draw(msg_queue):
     _send(msg_queue, EventMsg(Event.LayoutDraw))
 
@@ -166,6 +183,9 @@ def event_stop_stopwatch(msg_queue):
 
 def event_stop_printer(msg_queue):
     _send(msg_queue, EventMsg(Event.StopPrinter))
+
+def event_tag_setted(msg_queue, tag):
+    _send(msg_queue, EventMsg(Event.TagSetted, tag))
 
 def event_tag_change(msg_queue):
     _send(msg_queue, EventMsg(Event.TagChange))
