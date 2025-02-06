@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
 from os import getpid
+import signal
 
 from messages import *
 
@@ -29,81 +30,103 @@ def printer_display(stdscr, msg_queue, tags):
     (Screen(
         build_main_layout(height,width),
         build_input_layout(height,width),
-        build_tag_input_layout(height,width,tags)
+        build_tag_input_layout(height,width,tags),
+        screen=stdscr
      )).run()
 
 def build_main_layout(height,width):
-    timer_height = height // 2
-    status_bar_height = 3
-    command_input_height = 3
-    manual_height = timer_height - status_bar_height
-    app_messages_height = timer_height - command_input_height - status_bar_height
+    layout = main_layout(height,width)
 
-    height_offset = timer_height + status_bar_height
-
-    timer_width = width
-    status_bar_width = width
-    manual_width = width // 2
-    command_input_width = manual_width
-    app_messages_width = manual_width
+    height_offset = layout["timer_height"] + layout["status_bar_height"]
 
     return Layout(
             StatusBarTile(
-                window=curses.newwin(status_bar_height, status_bar_width, 0, 0),
-                width=status_bar_width,
-                height=status_bar_height),
+                window=curses.newwin(layout["status_bar_height"], layout["status_bar_width"], 0, 0),
+                width=layout["status_bar_width"],
+                height=layout["status_bar_height"]),
             TimerTile(
-                window=curses.newwin(timer_height, timer_width, status_bar_height, 0),
-                width=timer_width,
-                height=timer_height
+                window=curses.newwin(layout["timer_height"], layout["timer_width"], layout["status_bar_height"], 0),
+                width=layout["timer_width"],
+                height=layout["timer_height"]
                 ),
             ManualTile(
-                window=curses.newwin(manual_height, manual_width, height_offset, 0),
-                width=manual_width,
-                height=manual_height),
+                window=curses.newwin(layout["manual_height"], layout["manual_width"], height_offset, 0),
+                width=layout["manual_width"],
+                height=layout["manual_height"]),
             CommandInputTile(
-                window=curses.newwin(command_input_height, command_input_width, height_offset, manual_width),
-                width=command_input_width,
-                height=command_input_height
+                window=curses.newwin(layout["command_input_height"], layout["command_input_width"], height_offset, layout["manual_width"]),
+                width=layout["command_input_width"],
+                height=layout["command_input_height"]
                 ),
             AppMessagesTile(
-                window=curses.newwin(app_messages_height, app_messages_width, height_offset + command_input_height, manual_width),
-                width=app_messages_width,
-                height=app_messages_height)
+                window=curses.newwin(layout["app_messages_height"], layout["app_messages_width"], height_offset + layout["command_input_height"], layout["manual_width"]),
+                width=layout["app_messages_width"],
+                height=layout["app_messages_height"])
     )
 
+def main_layout(height, width):
+    timer_height = (height // 2)
+    status_bar_height = 3
+    command_input_height = 3
+    manual_width = (width // 2)
+
+    return dict({
+    "timer_height": (height // 2),
+    "status_bar_height" : 3,
+    "command_input_height" : 3,
+    "manual_height" : (timer_height - status_bar_height),
+    "app_messages_height" : (timer_height - command_input_height - status_bar_height),
+
+    "timer_width" : (width),
+    "status_bar_width" : (width),
+    "manual_width" : (width // 2),
+    "command_input_width" : (manual_width),
+    "app_messages_width" : (manual_width)
+    })
+
 def build_input_layout(height, width):
-    win_height = height // 3
-    win_width = width // 2
-    
-    window = curses.newwin(win_height, win_width, height//3, width//2 //2)
+    layout = input_layout(height, width)
+    window = curses.newwin(layout["win_height"],layout["win_width"], height//3, width//2 //2)
 
     return Layout(
             PurposeInputTile(
                 window=window,
-                width=win_width,
-                height=win_height))
+                width=layout["win_width"],
+                height=layout["win_height"]))
+
+def input_layout(height, width):
+    return dict({
+        "win_height" : (height // 3),
+        "win_width" : (width // 2)
+    })
 
 def build_tag_input_layout(height, width, tags):
-    win_height = height // 3
-    win_width = width // 3
+    layout = tag_input_layout(height, width)
     
-    window = curses.newwin(win_height, win_width, height//3, width//3)
+    window = curses.newwin(layout["win_height"], layout["win_width"], height//3, width//3)
 
     return Layout(
             TagInputTile(
                 window=window,
-                width=win_width,
-                height=win_height,
+                width=layout["win_width"],
+                height=layout["win_height"],
                 tags=tags))
 
+def tag_input_layout(height, width):
+    return dict({
+        "win_height" : (height // 3),
+        "win_width" : (width // 3)
+    })
+
 class Screen:
-    def __init__(self, *layouts):
+    def __init__(self, *layouts, screen):
         self._layouts = layouts
         self._must_update = datetime.now()
         self._must_finish = False
+        self._screen = screen
 
         self._msgs_pipe = _msg_queue.suscribe(*[event for event in Event],suscriber=getpid())
+        signal.signal(signal.SIGWINCH, self._resize_event)
         self._logger = logging.getLogger(".printer")
 
     def run(self):
@@ -136,7 +159,6 @@ class Screen:
     def _draw_layout(self):
         for layout in self._layouts:
             layout.draw()
-            layout.refresh()
 
     def _refresh_if_have_to(self):
         if not self._time_is_up():
@@ -153,21 +175,29 @@ class Screen:
     def _set_next_update(self):
         self._must_update = datetime.now() + timedelta(seconds=0.5)
 
+    def _resize_event(self, signum, frame):
+        height, width = self._screen.getmaxyx()
+        # curses.resize_term(0,0)
+        curses.resize_term(height,width)
+        curses.resizeterm(height, width)
+        for layout in self._layouts:
+            layout.resize(height, width)
+
 class Layout:
     def __init__(self, *tiles): #: [Tile]
         self._tiles = tiles
 
     def draw(self):
-        self._tiles_do(lambda window: 
-            window.draw())
+        self._tiles_do(lambda window: window.draw())
 
     def refresh(self):
-        self._tiles_do(lambda window: 
-            window.refresh())
+        self._tiles_do(lambda window: window.refresh())
 
     def process(self, msg):
-        self._tiles_do(lambda window: 
-            window.process(msg))
+        self._tiles_do(lambda window: window.process(msg))
+
+    def resize(self, height, width):
+        self._tiles_do(lambda window: window.resize(height, width))
 
     def _tiles_do(self, func):
         for tile in self._tiles:
@@ -191,8 +221,18 @@ class Tile(ABC):
     def draw(self) -> None:
         raise RuntimeError("Shouldn't be used")
 
+    @abstractmethod
+    def resize(self, height, width) -> None:
+        raise RuntimeError("Shouldn't be used")
+
     def _refresh(self) -> None:
         self.window.refresh()
+
+    def _resize(self, height, width):
+        self.height = height
+        self.width = width
+
+        self.window.resize(height, width)
 
 class TimerTile(Tile):
     def __init__(self, window, width, height):
@@ -200,18 +240,23 @@ class TimerTile(Tile):
 
         self._text_effect = NoneTextEffect()
         self._figlet = Figlet(font="standard")
-
-        self._start_y = height // 3 + 2
-        self._start_x = width // 3 + 7
-
         self._logger = logging.getLogger(".timer_window")
 
         self._time = ""
         self._color = None
+        self._on_break = False
+
+    def resize(self, height, width):
+        layout = main_layout(height,width)
+        self._resize(layout["timer_height"], layout["timer_width"])
+        self.draw()
 
     def draw(self):
         self.window.clear()
-        self._draw_default_layout()
+        if self._on_break:
+            self._draw_on_break()
+        else:
+            self._draw_default_layout()
 
     def process(self, msg):
         match msg.kind:
@@ -229,11 +274,13 @@ class TimerTile(Tile):
 
             case Event.BreakBegin:
                 self._start_color()
-                self._draw_on_break()
+                self._on_break = True
+                self.draw()
 
             case Event.BreakFinished:
                 self._shutdown_color()
-                self._draw_default_layout()
+                self._on_break = False
+                self.draw()
 
             case _:
                 pass
@@ -242,21 +289,25 @@ class TimerTile(Tile):
         if self._text_effect.empty():
             self._text_effect.refill()
 
-        self._text_effect.render(TimerRenderInput(
-            window=self, 
-            window_width=self.width, 
-            start_y=self._start_y, 
-            start_x=self._start_x, 
-            figlet_render=self._figlet, 
-            time_str=self._figlet_readable_str(self._time)))
+        self._text_effect.render(self, self._spaced_str(self._time))
 
         self._refresh()
+
+    def render(self, text):
+        figlet_str = self._figlet.renderText(text)
+
+        start_y = self.height // 3 + 2
+        start_x = self.width // 3 + 7
+        for index, line in enumerate(figlet_str.splitlines()):
+            self.window.addstr( start_y + index, 1, " " * (self.width - 2))  # Limpiar la línea
+            self.window.addstr( start_y + index, start_x, line.rstrip())
 
     def addstr(self, y, x, text):
         if curses.has_colors() and self._color:
             self.window.addstr(y,x,text,self._color)
         else:
             self.window.addstr(y,x,text)
+
     def erase(self):
         self.window.erase()
 
@@ -277,7 +328,7 @@ class TimerTile(Tile):
     def _shutdown_color(self):
         self._color = None
 
-    def _figlet_readable_str(self, time_str):
+    def _spaced_str(self, time_str):
         numbers_splited = time_str.split(":")
         return " : ".join(numbers_splited)
 
@@ -286,6 +337,11 @@ class AppMessagesTile(Tile):
         super().__init__(window, width, height) 
 
         self._app_messages = []
+
+    def resize(self, height, width):
+        layout = main_layout(height,width)
+        self._resize(layout["app_messages_height"], layout["app_messages_width"])
+        self.draw()
 
     def draw(self):
         self.window.clear()
@@ -313,6 +369,11 @@ class CommandInputTile(Tile):
 
         self._command = ""
 
+    def resize(self, height, width):
+        layout = main_layout(height,width)
+        self._resize(layout["command_input_height"], layout["command_input_width"])
+        self.draw()
+
     def draw(self):
         self.window.clear()
         self.window.box()
@@ -333,6 +394,11 @@ class ManualTile(Tile):
 
         self._manual = self._timer_manual()
 
+    def resize(self, height, width):
+        layout = main_layout(height,width)
+        self._resize(layout["manual_height"], layout["manual_width"])
+        self.draw()
+
     def draw(self):
         self.window.clear()
         self.window.box()
@@ -341,16 +407,16 @@ class ManualTile(Tile):
     def process(self, msg):
         if msg.kind == Event.TimerInit:
             self._manual = self._timer_manual()
+            self.window.clear()
+            self.draw()
         elif msg.kind == Event.PomodoroInit:
             self._manual = self._pomodoro_manual()
-
-        self.window.clear()
-        self.draw()
+            self.window.clear()
+            self.draw()
 
     def refresh(self):
         for index, line in enumerate(list(filter(None,self._manual.splitlines()))):
             self.window.addstr(index+2, 1, line)
-        self.window.refresh()
 
         self._refresh()
 
@@ -391,6 +457,11 @@ class StatusBarTile(Tile):
         self._POMODOROS_TITLE = "Pomodoros:"
         self._TAG_TITLE = "tag:"
         self._PURPOSE_TITLE = "Intención:"
+
+    def resize(self, height, width):
+        layout = main_layout(height,width)
+        self._resize(layout["status_bar_height"], layout["status_bar_width"])
+        self.draw()
 
     def draw(self):
         self.window.clear()
@@ -488,6 +559,11 @@ class PurposeInputTile(Tile):
 
         self._show = False
 
+    def resize(self, height, width):
+        layout = input_layout(height,width)
+        self._resize(layout["win_height"], layout["win_width"])
+        self.draw()
+
     def process(self, msg):
         if msg.kind == Event.AddPurpose:
             self._show = True
@@ -516,7 +592,7 @@ class PurposeInputTile(Tile):
             self.window.clear()
 
     def draw(self):
-        pass
+        self.window.clear()
 
 class TagInputTile(Tile):
     def __init__(self, window, width , height, tags):
@@ -529,13 +605,17 @@ class TagInputTile(Tile):
         tags.append(self._no_tag)
         self._tags = tags
 
+    def resize(self, height, width):
+        layout = tag_input_layout(height,width)
+        self._resize(layout["win_height"], layout["win_width"])
+        self.draw()
+
     def process(self, msg):
         if msg.kind == Event.TagChange:
             self._show = True
 
     def refresh(self):
         if self._show:
-
             selected = self._show_list_menu()
 
             self._show = False
@@ -543,18 +623,16 @@ class TagInputTile(Tile):
             event_tag_changed(_msg_queue, tag)
             event_tag_finished(_msg_queue)
             event_layout_draw(_msg_queue)
-            self.window.clear()
 
     def draw(self):
-        pass
+        self.window.clear()
+        self.window.border()
+        self.window.addstr(0, 2, " ¿A qué tag querés cambiar? ")
 
     def _show_list_menu(self):
         menu_items = self._tags
         selected_idx = 0
-        self.window.clear()
-        msg = " ¿A qué tag querés cambiar? " 
-        self.window.border()
-        self.window.addstr(0, 2, msg)
+        self.draw()
         h = self.height
         w = self.width
 
@@ -583,6 +661,7 @@ class TagInputTile(Tile):
             elif key == ord("\n"):  # Enter para seleccionar
                 break
 
+        self.window.clear()
         return selected_idx
 
 class TextEffect(ABC):
@@ -595,7 +674,7 @@ class TextEffect(ABC):
         pass
 
     @abstractmethod
-    def render(self, timer_render_obj) -> None:
+    def render(self, window, text) -> None:
         pass
 
 class NoneTextEffect(TextEffect):
@@ -608,8 +687,8 @@ class NoneTextEffect(TextEffect):
     def refill(self):
         pass
 
-    def render(self, timer_render_obj):
-        render_time(timer_render_obj)
+    def render(self, window, text):
+        window.render(text)
 
 class SlideTextEffect(TextEffect):
     def __init__(self):
@@ -623,13 +702,12 @@ class SlideTextEffect(TextEffect):
     def refill(self):
         self._fill()
 
-    def render(self, timer_render_obj):
+    def render(self, window, text):
         frame = self._frame()
         if frame:
-            timer_render_obj.time_str = self._slide_effect(timer_render_obj.time_str)
-            render_time(timer_render_obj)
+            window.render(self._slide_effect(text))
         else:
-            render_time(timer_render_obj)
+            window.render(text)
 
     def _slide_effect(self, time_str):
         res = list(time_str)
@@ -667,37 +745,17 @@ class BlinkTextEffect(TextEffect):
     def refill(self):
         self._fill()
 
-    def render(self, timer_render_obj):
+    def render(self, window, text):
         frame = self._frame()
         if frame:
-            render_time(timer_render_obj)
+            window.render(text)
         else:
-            timer_render_obj.window.erase()
-            timer_render_obj.window.box()
-            timer_render_obj.window.addstr(0, 2, " Tiempo para finalizar ")
+            window.erase()
+            window.box()
+            window.addstr(0, 2, " Tiempo para finalizar ")
 
     def _frame(self):
         return self._period.pop()
 
     def _fill(self):
         self._period = [False,True]
-
-def render_time(timer_obj):
-    figlet_str = timer_obj.figlet_render.renderText(timer_obj.time_str)
-
-    for index, line in enumerate(figlet_str.splitlines()):
-        timer_obj.window.addstr( timer_obj.start_y + index, 1, 
-                " " * (timer_obj.window_width - 2))  # Limpiar la línea
-        timer_obj.window.addstr(
-                timer_obj.start_y + index, 
-                timer_obj.start_x, 
-                line.rstrip())
-
-@dataclass
-class TimerRenderInput():
-    window : Any
-    window_width : int
-    start_y : int
-    start_x : int
-    figlet_render : Any
-    time_str : str
