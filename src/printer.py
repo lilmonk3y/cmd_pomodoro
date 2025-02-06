@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import logging
 from os import getpid
 import signal
+import subprocess
 
 from messages import *
 
@@ -124,6 +125,7 @@ class Screen:
         self._must_update = datetime.now()
         self._must_finish = False
         self._screen = screen
+        self._current_y, self._current_x = screen.getmaxyx()
 
         self._msgs_pipe = _msg_queue.suscribe(*[event for event in Event],suscriber=getpid())
         signal.signal(signal.SIGWINCH, self._resize_event)
@@ -177,11 +179,24 @@ class Screen:
 
     def _resize_event(self, signum, frame):
         height, width = self._screen.getmaxyx()
+        self._logger.info("The old dimensions are y: {} x: {} and new ones are y: {}, x: {}"
+                          .format(self._current_y, self._current_x, height, width))
+        n_height, n_width = self._native_getmaxyx()
+        self._logger.info("NATIVE - The old dimensions are y: {} x: {} and new ones are y: {}, x: {}"
+                          .format(self._current_y, self._current_x, n_height, n_width))
+        self._current_y = height
+        self._current_x = width
         # curses.resize_term(0,0)
         curses.resize_term(height,width)
         curses.resizeterm(height, width)
         for layout in self._layouts:
             layout.resize(height, width)
+
+    def _native_getmaxyx(self):
+        def get_os_cmd_output(cmd_list):
+            return int(subprocess.run(cmd_list, stdout=subprocess.PIPE).stdout.decode('utf-8'))
+        
+        return get_os_cmd_output(['tput','lines']), get_os_cmd_output(['tput','cols'])
 
 class Layout:
     def __init__(self, *tiles): #: [Tile]
