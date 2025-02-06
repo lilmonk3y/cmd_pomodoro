@@ -1,10 +1,8 @@
 from abc import abstractmethod, ABC
-from typing import Any
 from pyfiglet import Figlet
 import curses
 from curses import textpad
 from datetime import datetime, timedelta
-from dataclasses import dataclass
 import logging
 from os import getpid
 import signal
@@ -72,17 +70,17 @@ def main_layout(height, width):
     manual_width = (width // 2)
 
     return dict({
-    "timer_height": (height // 2),
-    "status_bar_height" : 3,
-    "command_input_height" : 3,
-    "manual_height" : (timer_height - status_bar_height),
-    "app_messages_height" : (timer_height - command_input_height - status_bar_height),
+        "status_bar_height" : status_bar_height,
+        "timer_height": timer_height,
+        "manual_height" : (timer_height - status_bar_height),
+        "command_input_height" : command_input_height,
+        "app_messages_height" : (timer_height - command_input_height - status_bar_height),
 
-    "timer_width" : (width),
-    "status_bar_width" : (width),
-    "manual_width" : (width // 2),
-    "command_input_width" : (manual_width),
-    "app_messages_width" : (manual_width)
+        "timer_width" : width,
+        "status_bar_width" : width,
+        "manual_width" : manual_width,
+        "command_input_width" : manual_width,
+        "app_messages_width" : manual_width
     })
 
 def build_input_layout(height, width):
@@ -125,10 +123,9 @@ class Screen:
         self._must_update = datetime.now()
         self._must_finish = False
         self._screen = screen
-        self._current_y, self._current_x = screen.getmaxyx()
 
         self._msgs_pipe = _msg_queue.suscribe(*[event for event in Event],suscriber=getpid())
-        signal.signal(signal.SIGWINCH, self._resize_event)
+        signal.signal(signal.SIGWINCH, self._resize_event_handler)
         self._logger = logging.getLogger(".printer")
 
     def run(self):
@@ -177,20 +174,16 @@ class Screen:
     def _set_next_update(self):
         self._must_update = datetime.now() + timedelta(seconds=0.5)
 
-    def _resize_event(self, signum, frame):
-        height, width = self._screen.getmaxyx()
-        self._logger.info("The old dimensions are y: {} x: {} and new ones are y: {}, x: {}"
-                          .format(self._current_y, self._current_x, height, width))
-        n_height, n_width = self._native_getmaxyx()
-        self._logger.info("NATIVE - The old dimensions are y: {} x: {} and new ones are y: {}, x: {}"
-                          .format(self._current_y, self._current_x, n_height, n_width))
-        self._current_y = height
-        self._current_x = width
-        # curses.resize_term(0,0)
+    def _resize_event_handler(self, signum, frame):
+        height, width = self._native_getmaxyx()
         curses.resize_term(height,width)
         curses.resizeterm(height, width)
+
+        self._screen.erase()
+        #self._screen.refresh()
         for layout in self._layouts:
             layout.resize(height, width)
+            layout.draw()
 
     def _native_getmaxyx(self):
         def get_os_cmd_output(cmd_list):
@@ -247,7 +240,19 @@ class Tile(ABC):
         self.height = height
         self.width = width
 
+        self.window.clear()
         self.window.resize(height, width)
+
+    def addstr(self, pos_y, pos_x, text, color=None):
+        in_range = pos_y < self.height and pos_x < self.width
+        if not in_range:
+            return 
+
+        limit = self.width -2 -pos_x
+        if color:
+            self.window.addstr(pos_y, pos_x, text[:limit], color)
+        else:
+            self.window.addstr(pos_y, pos_x, text[:limit])
 
 class TimerTile(Tile):
     def __init__(self, window, width, height):
@@ -314,14 +319,14 @@ class TimerTile(Tile):
         start_y = self.height // 3 + 2
         start_x = self.width // 3 + 7
         for index, line in enumerate(figlet_str.splitlines()):
-            self.window.addstr( start_y + index, 1, " " * (self.width - 2))  # Limpiar la línea
-            self.window.addstr( start_y + index, start_x, line.rstrip())
+            self.addstr( start_y + index, 1, " " * (self.width - 2))  # Limpiar la línea
+            self.addstr( start_y + index, start_x, line.rstrip())
 
-    def addstr(self, y, x, text):
+    def addstr(self, pos_y, pos_x, text):
         if curses.has_colors() and self._color:
-            self.window.addstr(y,x,text,self._color)
+            super().addstr(pos_y,pos_x,text,self._color)
         else:
-            self.window.addstr(y,x,text)
+            super().addstr(pos_y,pos_x,text)
 
     def erase(self):
         self.window.erase()
@@ -356,12 +361,11 @@ class AppMessagesTile(Tile):
     def resize(self, height, width):
         layout = main_layout(height,width)
         self._resize(layout["app_messages_height"], layout["app_messages_width"])
-        self.draw()
 
     def draw(self):
         self.window.clear()
         self.window.box()
-        self.window.addstr(0, 2, " Mensajes de la aplicación ")
+        self.addstr(0, 2, " Mensajes de la aplicación ")
 
     def process(self, msg) -> None:
         if msg.kind == Event.App:
@@ -369,8 +373,8 @@ class AppMessagesTile(Tile):
 
     def refresh(self):
         for index, msg in enumerate(list(reversed(self._app_messages))[:self.height-2]):
-            self.window.addstr(index+1,1," " * (self.width - 2))  # Limpiar la línea
-            self.window.addstr(index+1,1,self._shortened(msg))
+            self.addstr(index+1,1," " * (self.width - 2))  # Limpiar la línea
+            self.addstr(index+1,1,self._shortened(msg))
 
         self._refresh()
     
@@ -387,19 +391,18 @@ class CommandInputTile(Tile):
     def resize(self, height, width):
         layout = main_layout(height,width)
         self._resize(layout["command_input_height"], layout["command_input_width"])
-        self.draw()
 
     def draw(self):
         self.window.clear()
         self.window.box()
-        self.window.addstr(0, 2, " Comandos tipeados ")
+        self.addstr(0, 2, " Comandos tipeados ")
 
     def process(self, msg):
         if msg.kind == Event.Cmd:
             self._command = msg.msg
 
     def refresh(self):
-        self.window.addstr(1, 1, "Último comando presionado: {}".format(self._command))
+        self.addstr(1, 1, "Último comando presionado: {}".format(self._command))
 
         self._refresh()
 
@@ -412,12 +415,11 @@ class ManualTile(Tile):
     def resize(self, height, width):
         layout = main_layout(height,width)
         self._resize(layout["manual_height"], layout["manual_width"])
-        self.draw()
 
     def draw(self):
         self.window.clear()
         self.window.box()
-        self.window.addstr(0, 2, " Manual ")
+        self.addstr(0, 2, " Manual ")
 
     def process(self, msg):
         if msg.kind == Event.TimerInit:
@@ -431,7 +433,7 @@ class ManualTile(Tile):
 
     def refresh(self):
         for index, line in enumerate(list(filter(None,self._manual.splitlines()))):
-            self.window.addstr(index+2, 1, line)
+            self.addstr(index+2, 1, line)
 
         self._refresh()
 
@@ -476,12 +478,11 @@ class StatusBarTile(Tile):
     def resize(self, height, width):
         layout = main_layout(height,width)
         self._resize(layout["status_bar_height"], layout["status_bar_width"])
-        self.draw()
 
     def draw(self):
         self.window.clear()
         self.window.box()
-        self.window.addstr(0, 2, " Status ")
+        self.addstr(0, 2, " Status ")
 
     def process(self, msg) -> None:
         match msg.kind:
@@ -509,8 +510,8 @@ class StatusBarTile(Tile):
         pos_x = 2
 
         # End time
-        self.window.addstr(pos_y, pos_x, self._END_TIME_TITLE)
-        action = lambda: self.window.addstr(pos_y, pos_x + len(self._END_TIME_TITLE) + 1, self._end_time)
+        self.addstr(pos_y, pos_x, self._END_TIME_TITLE)
+        action = lambda: self.addstr(pos_y, pos_x + len(self._END_TIME_TITLE) + 1, self._end_time)
         if self._end_time_dirty:
             self._with_effect(curses.A_DIM, action)
         else: 
@@ -518,9 +519,9 @@ class StatusBarTile(Tile):
         pos_x += self._SPACE_FOR_EACH
         
         # Pomodoros
-        self.window.addstr(pos_y, pos_x, self._POMODOROS_TITLE)
+        self.addstr(pos_y, pos_x, self._POMODOROS_TITLE)
         pomodoros_text = "{}/{}".format(self._pomodoros_done,self._pomodoros_to_complete)
-        action = lambda: self.window.addstr(pos_y, pos_x + len(self._POMODOROS_TITLE) + 1, pomodoros_text)
+        action = lambda: self.addstr(pos_y, pos_x + len(self._POMODOROS_TITLE) + 1, pomodoros_text)
         if str(self._pomodoros_done) == self._pomodoros_to_complete:
             self._with_effect(curses.A_BLINK,action)
         else:
@@ -528,16 +529,16 @@ class StatusBarTile(Tile):
         pos_x += self._SPACE_FOR_EACH
 
         # Tag
-        self.window.addstr(pos_y, pos_x, self._TAG_TITLE)
+        self.addstr(pos_y, pos_x, self._TAG_TITLE)
         offset = len(self._TAG_TITLE) + 1
-        action = lambda: self.window.addstr(pos_y, pos_x + offset, self._shortened(self._tag, pos_x, offset))
+        action = lambda: self.addstr(pos_y, pos_x + offset, self._shortened(self._tag, pos_x, offset))
         self._with_effect(curses.A_STANDOUT, action)
         pos_x += self._SPACE_FOR_EACH
         
         # Purpose
-        self.window.addstr(pos_y, pos_x, self._PURPOSE_TITLE)
+        self.addstr(pos_y, pos_x, self._PURPOSE_TITLE)
         offset = len(self._PURPOSE_TITLE) + 1
-        self.window.addstr(pos_y, pos_x + offset, self._shortened_last(self._purpose, pos_x, offset))
+        self.addstr(pos_y, pos_x + offset, self._shortened_last(self._purpose, pos_x, offset))
         pos_x += self._SPACE_FOR_EACH
         
         self._refresh()
@@ -577,7 +578,6 @@ class PurposeInputTile(Tile):
     def resize(self, height, width):
         layout = input_layout(height,width)
         self._resize(layout["win_height"], layout["win_width"])
-        self.draw()
 
     def process(self, msg):
         if msg.kind == Event.AddPurpose:
@@ -585,11 +585,9 @@ class PurposeInputTile(Tile):
 
     def refresh(self):
         if self._show:
-            msg = "¿Cuál es el objetivo de este pomodoro?"
-            self.window.border()
-            self.window.addstr(1, 2, msg)
             textbox_win = self.window.derwin(self.height-4, self.width-3, 2, 2)
             textbox = textpad.Textbox(textbox_win)
+            self.draw()
             self.window.refresh()
 
             def validator(ascii_key):
@@ -604,10 +602,11 @@ class PurposeInputTile(Tile):
             event_purpose_added(_msg_queue, purpose)
             event_purpose_finished(_msg_queue)
             event_layout_draw(_msg_queue)
-            self.window.clear()
 
     def draw(self):
         self.window.clear()
+        self.window.border()
+        self.addstr(1, 2,  "¿Cuál es el objetivo de este pomodoro?")
 
 class TagInputTile(Tile):
     def __init__(self, window, width , height, tags):
@@ -623,7 +622,6 @@ class TagInputTile(Tile):
     def resize(self, height, width):
         layout = tag_input_layout(height,width)
         self._resize(layout["win_height"], layout["win_width"])
-        self.draw()
 
     def process(self, msg):
         if msg.kind == Event.TagChange:
@@ -642,7 +640,7 @@ class TagInputTile(Tile):
     def draw(self):
         self.window.clear()
         self.window.border()
-        self.window.addstr(0, 2, " ¿A qué tag querés cambiar? ")
+        self.addstr(0, 2, " ¿A qué tag querés cambiar? ")
 
     def _show_list_menu(self):
         menu_items = self._tags
@@ -659,10 +657,10 @@ class TagInputTile(Tile):
 
                 if i == selected_idx:
                     self.window.attron(curses.A_REVERSE)  # Resalta la opción
-                    self.window.addstr(y, x, item)
+                    self.addstr(y, x, item)
                     self.window.attroff(curses.A_REVERSE)
                 else:
-                    self.window.addstr(y, x, item)
+                    self.addstr(y, x, item)
 
             self.window.refresh()
 
