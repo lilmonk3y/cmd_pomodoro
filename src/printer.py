@@ -357,8 +357,7 @@ class ManualTile(Tile):
     def _timer_manual(self):
         manual = """
         Las opciones de teclas son:
-        p   Pausar el temporizador
-        c   Continuar con el temporizador
+        p   Pausar/continuar con el temporizador
         f   Finalizar el temporizador ó Detener el sonido de finalización del timer.
         t   Iniciar/detener un stopwatch
         i   Agregar una intención/propósito para la sesión en curso

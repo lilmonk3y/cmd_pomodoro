@@ -154,23 +154,17 @@ class Main:
         key = get_key()
         match key:
             case "p":
-                if self._paused:
-                    return
-
                 if not self._can_pause:
                     return
 
-                self._paused = True
                 print_cmd_msg(self._msg_queue,"p")
-                event_stop_timer(self._msg_queue)
 
-            case "c":
                 if not self._paused:
-                    return
-
-                self._paused = False
-                print_cmd_msg(self._msg_queue,"c")
-                event_resume_timer(self._msg_queue)
+                    self._paused = True
+                    event_stop_timer(self._msg_queue)
+                else:
+                    self._paused = False
+                    event_resume_timer(self._msg_queue)
 
             case "f":
                 print_cmd_msg(self._msg_queue,"f")
@@ -193,10 +187,12 @@ class Main:
                     self._stopwatch_process.start()
             
             case "i":
+                print_cmd_msg(self._msg_queue, "i")
                 event_add_purpose(self._msg_queue)
                 self._in_input_state = True
 
             case "r":
+                print_cmd_msg(self._msg_queue, "r")
                 event_tag_change(self._msg_queue)
                 self._in_input_state = True
             
