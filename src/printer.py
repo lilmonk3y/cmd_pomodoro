@@ -265,11 +265,16 @@ class TimerTile(Tile):
         self._time = ""
         self._color = None
         self._on_break = False
+        self._start_y = 1
+        self._start_x = 1
 
     def resize(self, height, width):
         layout = main_layout(height,width)
         self._resize(layout["timer_height"], layout["timer_width"])
-        self.draw()
+
+        # force time placement update
+        self._start_y = 1
+        self._start_x = 1
 
     def draw(self):
         self.window.clear()
@@ -315,12 +320,11 @@ class TimerTile(Tile):
 
     def render(self, text):
         figlet_str = self._figlet.renderText(text)
-
-        start_y = self.height // 3 + 2
-        start_x = self.width // 3 + 7
-        for index, line in enumerate(figlet_str.splitlines()):
-            self.addstr( start_y + index, 1, " " * (self.width - 2))  # Limpiar la línea
-            self.addstr( start_y + index, start_x, line.rstrip())
+        splited_str = figlet_str.splitlines()
+        self._update_once_when_str_fullsize(splited_str)
+        for index, line in enumerate(splited_str):
+            self.addstr( self._start_y + index, 1, " " * (self.width - 2))  # Limpiar la línea
+            self.addstr( self._start_y + index, self._start_x, line.rstrip())
 
     def addstr(self, pos_y, pos_x, text):
         if curses.has_colors() and self._color:
@@ -333,6 +337,16 @@ class TimerTile(Tile):
 
     def box(self):
         self.window.box()
+
+    def _update_once_when_str_fullsize(self, figlet_matrix):
+        true_after_first_update = self._start_x > 1 and self._start_y > 1
+        if true_after_first_update:
+            return
+
+        str_height = len(figlet_matrix)
+        one_line_width = len(figlet_matrix[0]) if str_height > 0 else 0
+        self._start_y = self.height // 2 - str_height // 2
+        self._start_x = self.width // 2 - one_line_width // 2
 
     def _draw_on_break(self):
         self.window.box()
