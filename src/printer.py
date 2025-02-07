@@ -267,6 +267,7 @@ class TimerTile(Tile):
         self._on_break = False
         self._start_y = 1
         self._start_x = 1
+        self._ticks = 0
 
     def resize(self, height, width):
         layout = main_layout(height,width)
@@ -275,6 +276,7 @@ class TimerTile(Tile):
         # force time placement update
         self._start_y = 1
         self._start_x = 1
+        self._ticks = 0
 
     def draw(self):
         self.window.clear()
@@ -287,6 +289,7 @@ class TimerTile(Tile):
         match msg.kind:
             case Event.TimeChange:
                 self._time = msg.msg
+                self._ticks += 1
 
             case Event.TimerStopped:
                 self._text_effect = BlinkTextEffect()
@@ -339,7 +342,7 @@ class TimerTile(Tile):
         self.window.box()
 
     def _update_once_when_str_fullsize(self, figlet_matrix):
-        true_after_first_update = self._start_x > 1 and self._start_y > 1
+        true_after_first_update = self._start_x > 1 and self._start_y > 1 and self._ticks > 2
         if true_after_first_update:
             return
 
