@@ -27,61 +27,15 @@ def printer_display(stdscr, msg_queue, tags):
     height, width = stdscr.getmaxyx()
 
     (Screen(
-        build_main_layout(height,width),
+        TimerLayout(
+            curses.newwin(height, width), 
+            height, 
+            width),
         build_input_layout(height,width),
         build_tag_input_layout(height,width,tags),
         screen=stdscr
      )).run()
 
-def build_main_layout(height,width):
-    layout = main_layout(height,width)
-
-    height_offset = layout["timer_height"] + layout["status_bar_height"]
-
-    return Layout(
-            StatusBarTile(
-                window=curses.newwin(layout["status_bar_height"], layout["status_bar_width"], 0, 0),
-                width=layout["status_bar_width"],
-                height=layout["status_bar_height"]),
-            TimerTile(
-                window=curses.newwin(layout["timer_height"], layout["timer_width"], layout["status_bar_height"], 0),
-                width=layout["timer_width"],
-                height=layout["timer_height"]
-                ),
-            ManualTile(
-                window=curses.newwin(layout["manual_height"], layout["manual_width"], height_offset, 0),
-                width=layout["manual_width"],
-                height=layout["manual_height"]),
-            CommandInputTile(
-                window=curses.newwin(layout["command_input_height"], layout["command_input_width"], height_offset, layout["manual_width"]),
-                width=layout["command_input_width"],
-                height=layout["command_input_height"]
-                ),
-            AppMessagesTile(
-                window=curses.newwin(layout["app_messages_height"], layout["app_messages_width"], height_offset + layout["command_input_height"], layout["manual_width"]),
-                width=layout["app_messages_width"],
-                height=layout["app_messages_height"])
-    )
-
-def main_layout(height, width):
-    timer_height = (height // 2)
-    status_bar_height = 3
-    command_input_height = 3
-    manual_width = (width // 2)
-
-    return dict({
-        "status_bar_height" : status_bar_height,
-        "timer_height": timer_height,
-        "manual_height" : (timer_height - status_bar_height),
-        "command_input_height" : command_input_height,
-        "app_messages_height" : (timer_height - command_input_height - status_bar_height),
-
-        "timer_width" : width,
-        "status_bar_width" : width,
-        "manual_width" : manual_width,
-        "command_input_width" : manual_width,
-        "app_messages_width" : manual_width
-    })
 
 def build_input_layout(height, width):
     layout = input_layout(height, width)
@@ -122,6 +76,7 @@ class Screen:
         self._layouts = layouts
         self._must_update = datetime.now()
         self._must_finish = False
+        self._must_draw = True
         self._screen = screen
 
         self._msgs_pipe = _msg_queue.suscribe(*[event for event in Event],suscriber=getpid())
@@ -129,7 +84,6 @@ class Screen:
         self._logger = logging.getLogger(".printer")
 
     def run(self):
-        self._draw_layout()
         event_printer_ready(_msg_queue)
 
         while not self._must_finish:
@@ -150,22 +104,22 @@ class Screen:
                 return
 
             if msg.kind == Event.LayoutDraw:
-                self._draw_layout()
+                self._must_draw = True
 
             for layout in self._layouts:
                 layout.process(msg)
-
-    def _draw_layout(self):
-        for layout in self._layouts:
-            layout.draw()
 
     def _refresh_if_have_to(self):
         if not self._time_is_up():
             return
         
         for layout in self._layouts:
-            layout.refresh()
+            if self._must_draw:
+                layout.draw()
 
+            layout.refresh()
+            
+        self._must_draw = False
         self._set_next_update()
 
     def _time_is_up(self):
@@ -179,11 +133,11 @@ class Screen:
         curses.resize_term(height,width)
         curses.resizeterm(height, width)
 
-        self._screen.erase()
-        #self._screen.refresh()
+        self._screen.clear()
         for layout in self._layouts:
             layout.resize(height, width)
-            layout.draw()
+
+        self._must_draw = True
 
     def _native_getmaxyx(self):
         def get_os_cmd_output(cmd_list):
@@ -211,6 +165,131 @@ class Layout:
         for tile in self._tiles:
             func(tile)
 
+class TimerLayout(Layout):
+    def __init__(self, window, height, width): 
+        self._window = window
+        self._height = height
+        self._width = width
+
+        layout = self.main_layout()
+
+        self._status_bar = StatusBarTile(
+            window=self._window.derwin(
+                layout["status_bar_y"], 
+                layout["status_bar_x"], 
+                layout["status_bar_y_offset"], 
+                layout["status_bar_x_offset"]), 
+            width=layout["status_bar_x"],
+            height=layout["status_bar_y"])
+
+        self._timer = TimerTile(
+            window=self._window.derwin(
+                layout["timer_y"], 
+                layout["timer_x"], 
+                layout["timer_y_offset"], 
+                layout["timer_x_offset"]), 
+            width=layout["timer_x"],
+            height=layout["timer_y"])
+
+        assert layout["manual_y"] + layout["manual_y_offset"] < self._height, "height out of range"
+        assert layout["manual_x"] + layout["manual_x_offset"] < self._width, "width out of range"
+        self._manual = ManualTile(
+            window=self._window.derwin(
+                layout["manual_y"], 
+                layout["manual_x"], 
+                layout["manual_y_offset"], 
+                layout["manual_x_offset"]), 
+            width=layout["manual_x"],
+            height=layout["manual_y"])
+
+        self._command_input = CommandInputTile(
+            window=self._window.derwin(
+                layout["command_input_y"], 
+                layout["command_input_x"], 
+                layout["command_input_y_offset"], 
+                layout["command_input_x_offset"]), 
+            width=layout["command_input_x"],
+            height=layout["command_input_y"])
+
+        self._app_messages = AppMessagesTile(
+            window=self._window.derwin(
+                layout["app_messages_y"], 
+                layout["app_messages_x"], 
+                layout["app_messages_y_offset"], 
+                layout["app_messages_x_offset"]), 
+            width=layout["app_messages_x"],
+            height=layout["app_messages_y"])
+
+        self._tiles = [
+            self._status_bar,
+            self._timer,
+            self._manual,
+            self._command_input,
+            self._app_messages
+        ]
+
+    def resize(self, height, width):
+        self._height = height
+        self._width = width
+
+        layout = self.main_layout()
+
+        self._status_bar.resize(
+            layout["status_bar_y"], layout["status_bar_x"], 
+            0, 0)
+        self._timer.resize(
+            layout["timer_y"], layout["timer_x"], 
+            layout["timer_y_offset"], layout["timer_x_offset"])
+        self._manual.resize(
+            layout["manual_y"], layout["manual_x"], 
+            layout["manual_y_offset"], layout["manual_x_offset"])
+        self._command_input.resize(
+            layout["command_input_y"], layout["command_input_x"], 
+            layout["command_input_y_offset"], layout["command_input_x_offset"])
+        self._app_messages.resize(
+            layout["app_messages_y"], layout["app_messages_x"], 
+            layout["app_messages_y_offset"], layout["app_messages_x_offset"])
+
+    def main_layout(self):
+        height = self._height
+        width = self._width
+
+        status_bar_height = 3
+        timer_height = (height // 2 - status_bar_height)
+        command_input_height = 3
+
+        manual_height = (height // 2)
+        manual_width = (width // 2)
+
+        height_offset = timer_height + status_bar_height
+
+        return dict({
+            "status_bar_y" : status_bar_height,
+            "status_bar_x" : width,
+            "status_bar_y_offset" : 0,
+            "status_bar_x_offset" : 0,
+
+            "timer_y": timer_height,
+            "timer_x" : width,
+            "timer_y_offset" : status_bar_height,
+            "timer_x_offset" : 0,
+
+            "manual_y" : manual_height,
+            "manual_x" : manual_width,
+            "manual_y_offset" : height_offset,
+            "manual_x_offset" : 0,
+
+            "command_input_y" : command_input_height,
+            "command_input_x" : manual_width,
+            "command_input_y_offset" : height_offset,
+            "command_input_x_offset" : manual_width,
+
+            "app_messages_y" : (height//2 - command_input_height),
+            "app_messages_x" : manual_width,
+            "app_messages_y_offset" : (height_offset + command_input_height),
+            "app_messages_x_offset" : manual_width
+        })
+
 class Tile(ABC):
     def __init__(self, window, width, height):
         self.window = window
@@ -229,19 +308,18 @@ class Tile(ABC):
     def draw(self) -> None:
         raise RuntimeError("Shouldn't be used")
 
-    @abstractmethod
-    def resize(self, height, width) -> None:
-        raise RuntimeError("Shouldn't be used")
-
-    def _refresh(self) -> None:
-        self.window.refresh()
-
-    def _resize(self, height, width):
+    def resize(self, height, width, height_offset=0, width_offset=0):
         self.height = height
         self.width = width
 
         self.window.clear()
         self.window.resize(height, width)
+
+        if height_offset != 0 and width_offset != 0:
+            self.window.mvderwin(height_offset, width_offset)
+
+    def _refresh(self) -> None:
+        self.window.refresh()
 
     def addstr(self, pos_y, pos_x, text, color=None):
         in_range = pos_y < self.height and pos_x < self.width
@@ -269,9 +347,8 @@ class TimerTile(Tile):
         self._start_x = 1
         self._ticks = 0
 
-    def resize(self, height, width):
-        layout = main_layout(height,width)
-        self._resize(layout["timer_height"], layout["timer_width"])
+    def resize(self, height, width, height_offset, width_offset):
+        super().resize(height, width, height_offset, width_offset)
 
         # force time placement update
         self._start_y = 1
@@ -375,10 +452,6 @@ class AppMessagesTile(Tile):
 
         self._app_messages = []
 
-    def resize(self, height, width):
-        layout = main_layout(height,width)
-        self._resize(layout["app_messages_height"], layout["app_messages_width"])
-
     def draw(self):
         self.window.clear()
         self.window.box()
@@ -405,10 +478,6 @@ class CommandInputTile(Tile):
 
         self._command = ""
 
-    def resize(self, height, width):
-        layout = main_layout(height,width)
-        self._resize(layout["command_input_height"], layout["command_input_width"])
-
     def draw(self):
         self.window.clear()
         self.window.box()
@@ -428,10 +497,6 @@ class ManualTile(Tile):
         super().__init__(window=window, width=width, height=height)
 
         self._manual = self._timer_manual()
-
-    def resize(self, height, width):
-        layout = main_layout(height,width)
-        self._resize(layout["manual_height"], layout["manual_width"])
 
     def draw(self):
         self.window.clear()
@@ -491,10 +556,6 @@ class StatusBarTile(Tile):
         self._POMODOROS_TITLE = "Pomodoros:"
         self._TAG_TITLE = "tag:"
         self._PURPOSE_TITLE = "Intención:"
-
-    def resize(self, height, width):
-        layout = main_layout(height,width)
-        self._resize(layout["status_bar_height"], layout["status_bar_width"])
 
     def draw(self):
         self.window.clear()
@@ -592,10 +653,6 @@ class PurposeInputTile(Tile):
 
         self._show = False
 
-    def resize(self, height, width):
-        layout = input_layout(height,width)
-        self._resize(layout["win_height"], layout["win_width"])
-
     def process(self, msg):
         if msg.kind == Event.AddPurpose:
             self._show = True
@@ -635,10 +692,6 @@ class TagInputTile(Tile):
         self._no_tag = ">Sin tag<"
         tags.append(self._no_tag)
         self._tags = tags
-
-    def resize(self, height, width):
-        layout = tag_input_layout(height,width)
-        self._resize(layout["win_height"], layout["win_width"])
 
     def process(self, msg):
         if msg.kind == Event.TagChange:
