@@ -17,8 +17,6 @@ from global_data import TEMPORARY_PATH
 from input_parser import read_input, must_config, process_config, load_config_from_file
 
 def main():
-    _init_logger()
-
     args = read_input()
     if must_config(args):
         process_config(args)
@@ -27,6 +25,8 @@ def main():
     config = load_config_from_file(args=args)
 
     verify_config_and_args(args, config)
+    
+    _init_logger(args)
 
     EventBrokerManager.register("EventBroker", EventBroker)
     with EventBrokerManager() as manager:
@@ -262,9 +262,9 @@ def play_audio_on_subprocess(args, audio_track_path, msg_queue):
     process.start()
     return process
 
-def _init_logger():
+def _init_logger(args):
     logging.basicConfig(
-            level=logging.INFO,
+            level=logging.DEBUG if args.debug else logging.INFO,
             filename=file_path_in_home(TEMPORARY_PATH,"cmd_pomodoro.log"), 
             filemode="a+")
     logger = logging.getLogger(".main")

@@ -93,6 +93,12 @@ def _build_parser():
             default=False,
             help="Define la configuración a ser levantada como la de test")
 
+    parser.add_argument(
+            "--debug", 
+            action="store_true", 
+            default=False,
+            help="Se configuran los logs para imprimir más información relevante para debugging")
+
     subparser = parser.add_subparsers(
             dest="cmd", 
             title="Comandos",

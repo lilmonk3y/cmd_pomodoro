@@ -65,7 +65,7 @@ class EventBroker:
         (ours, theirs) = Pipe()
         for event in events:
             if event in self._event_consumers.keys():
-                self._logger.info("Process {} suscribed to event {}".format(getpid(),event))
+                self._logger.debug("Process {} suscribed to event {}".format(getpid(),event))
                 self._event_consumers[event].append((ours, suscriber))
             else:
                 raise RuntimeError("Event {} is not a valid event".format(event))
@@ -84,7 +84,7 @@ class EventBroker:
             for index, (_, theirs_id) in enumerate(self._event_consumers[event]):
                 if theirs_id == suscriber_id:
                     self._event_consumers[event].pop(index)
-                    self._logger.info("deleted consumer {} from event {}".format(suscriber_id, event))
+                    self._logger.debug("deleted consumer {} from event {}".format(suscriber_id, event))
 
     def _publish_previous_msgs(self, topic, consumer_id, events):
         for msg in filter(lambda msg: msg.kind in events, self._msgs):
@@ -92,7 +92,7 @@ class EventBroker:
 
     def _publish_msg_to_consumer(self, msg, consumer, consumer_id):
         consumer.send(msg)
-        self._logger.info("Process {} has a new msg in it's pipe. msg: {}".format(consumer_id, msg))
+        self._logger.debug("Process {} has a new msg in it's pipe. msg: {}".format(consumer_id, msg))
 
 def print_time(msg_queue, time):
     _send(msg_queue, EventMsg(Event.TimeChange, time))
@@ -197,6 +197,4 @@ def event_tag_finished(msg_queue):
     _send(msg_queue, EventMsg(Event.TagFinished))
 
 def _send(msg_queue, msg: EventMsg):
-    logger = logging.getLogger(".messages")
-    logger.info("sending msg from {} {}".format(getpid(), msg))
     msg_queue.publish(msg)

@@ -96,7 +96,7 @@ class Screen:
         while self._msgs_pipe.poll():
             msg = self._msgs_pipe.recv()
 
-            self._logger.info("Printer is consuming msg {}".format(msg))
+            self._logger.debug("Printer is consuming msg {}".format(msg))
 
             if msg.kind == Event.StopPrinter:
                 self._must_finish = True
@@ -129,7 +129,7 @@ class Screen:
         self._must_update = datetime.now() + timedelta(seconds=0.5)
 
     def _resize_event_handler(self, signum, frame):
-        self._logger.info("Resize event received signum: {} frame: {}".format(signum, frame))
+        self._logger.debug("Resize event received signum: {} frame: {}".format(signum, frame))
         height, width = self._native_getmaxyx()
         curses.resize_term(height,width)
         curses.resizeterm(height, width)
@@ -234,7 +234,7 @@ class TimerLayout(Layout):
 
         self._window.clear()
         self._window.refresh() # Esto no debería ser necesario. Y hasta creo que está mal conceptualmente.
-        self._logger.info("TimerLayout window resized to y:{} x:{}".format(height, width))
+        self._logger.debug("TimerLayout window resized to y:{} x:{}".format(height, width))
         self._window.resize(height,width)
 
         layout = self.main_layout()
@@ -327,15 +327,15 @@ class Tile(ABC):
         self.window.clear()
 
         if height_offset != 0 or width_offset != 0:
-            self._logger.info("Tile {} window moved to y:{} x:{}".format(type(self).__name__, height_offset, width_offset))
+            self._logger.debug("Tile {} window moved to y:{} x:{}".format(type(self).__name__, height_offset, width_offset))
             self.window.mvderwin(height_offset, width_offset)
             self.window.clear()
 
-        self._logger.info("Tile {} window resized to y:{} x:{}".format(type(self).__name__, height, width))
+        self._logger.debug("Tile {} window resized to y:{} x:{}".format(type(self).__name__, height, width))
         self.window.resize(height, width)
 
     def _refresh(self) -> None:
-        self._logger.info("Tile {} window refreshed having dims y:{} x:{}".format(type(self).__name__, self.height, self.width))
+        self._logger.debug("Tile {} window refreshed having dims y:{} x:{}".format(type(self).__name__, self.height, self.width))
         self.window.refresh()
 
     def addstr(self, pos_y, pos_x, text, color=None):
