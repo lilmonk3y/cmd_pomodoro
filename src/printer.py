@@ -129,6 +129,7 @@ class Screen:
         self._must_update = datetime.now() + timedelta(seconds=0.5)
 
     def _resize_event_handler(self, signum, frame):
+        self._logger.info("Resize event received signum: {} frame: {}".format(signum, frame))
         height, width = self._native_getmaxyx()
         curses.resize_term(height,width)
         curses.resizeterm(height, width)
@@ -191,8 +192,6 @@ class TimerLayout(Layout):
             width=layout["timer_x"],
             height=layout["timer_y"])
 
-        assert layout["manual_y"] + layout["manual_y_offset"] < self._height, "height out of range"
-        assert layout["manual_x"] + layout["manual_x_offset"] < self._width, "width out of range"
         self._manual = ManualTile(
             window=self._window.derwin(
                 layout["manual_y"], 
@@ -227,10 +226,16 @@ class TimerLayout(Layout):
             self._command_input,
             self._app_messages
         ]
+        self._logger = logging.getLogger(".timer_layout")
 
     def resize(self, height, width):
         self._height = height
         self._width = width
+
+        self._window.clear()
+        self._window.refresh() # Esto no debería ser necesario. Y hasta creo que está mal conceptualmente.
+        self._logger.info("TimerLayout window resized to y:{} x:{}".format(height, width))
+        self._window.resize(height,width)
 
         layout = self.main_layout()
 
@@ -255,13 +260,18 @@ class TimerLayout(Layout):
         width = self._width
 
         status_bar_height = 3
-        timer_height = (height // 2 - status_bar_height)
-        command_input_height = 3
-
-        manual_height = (height // 2)
-        manual_width = (width // 2)
+        timer_height = height // 2 - status_bar_height
 
         height_offset = timer_height + status_bar_height
+
+        manual_height = height - height_offset
+        manual_width = width // 2
+
+        command_input_height = 3
+        command_input_width = width - manual_width
+
+        app_messages_height = manual_height - command_input_height
+        app_messages_y_offset = height_offset + command_input_height 
 
         return dict({
             "status_bar_y" : status_bar_height,
@@ -280,13 +290,13 @@ class TimerLayout(Layout):
             "manual_x_offset" : 0,
 
             "command_input_y" : command_input_height,
-            "command_input_x" : manual_width,
+            "command_input_x" : command_input_width,
             "command_input_y_offset" : height_offset,
             "command_input_x_offset" : manual_width,
 
-            "app_messages_y" : (height//2 - command_input_height),
-            "app_messages_x" : manual_width,
-            "app_messages_y_offset" : (height_offset + command_input_height),
+            "app_messages_y" : app_messages_height,
+            "app_messages_x" : command_input_width,
+            "app_messages_y_offset" : app_messages_y_offset,
             "app_messages_x_offset" : manual_width
         })
 
@@ -295,6 +305,8 @@ class Tile(ABC):
         self.window = window
         self.width = width
         self.height = height
+        
+        self._logger = logging.getLogger(".tile")
 
     @abstractmethod
     def process(self, msg: EventMsg) -> None:
@@ -313,12 +325,17 @@ class Tile(ABC):
         self.width = width
 
         self.window.clear()
+
+        if height_offset != 0 or width_offset != 0:
+            self._logger.info("Tile {} window moved to y:{} x:{}".format(type(self).__name__, height_offset, width_offset))
+            self.window.mvderwin(height_offset, width_offset)
+            self.window.clear()
+
+        self._logger.info("Tile {} window resized to y:{} x:{}".format(type(self).__name__, height, width))
         self.window.resize(height, width)
 
-        if height_offset != 0 and width_offset != 0:
-            self.window.mvderwin(height_offset, width_offset)
-
     def _refresh(self) -> None:
+        self._logger.info("Tile {} window refreshed having dims y:{} x:{}".format(type(self).__name__, self.height, self.width))
         self.window.refresh()
 
     def addstr(self, pos_y, pos_x, text, color=None):
