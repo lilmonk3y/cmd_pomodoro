@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from datetime import datetime, timedelta
 import time
 from os import getpid
@@ -24,7 +25,137 @@ def pomodoro(pomodoros, tag, pomodoro_time, pomodoro_break_duration, path_to_log
            pomodoro_break_duration=pomodoro_break_duration,
            purpose=purpose)).run()
 
-class Pomodoro:
+class Countdown:
+    pass
+    def __init__(self,
+                 msg_queue,
+                 log_file,
+                 tag,
+                 purpose,
+                 pomodoro_time):
+        self._msg_queue=msg_queue
+        self._pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
+
+        self._log_file=log_file
+        self._tag=tag
+        self._purpose = purpose
+        self._pomodoro_time = pomodoro_time
+
+
+        self._wait_printer = True
+        self._paused = False
+        self._must_exit = False
+
+        self._seconds = 0
+
+        if tag:
+            event_tag_setted(msg_queue,tag)
+        if purpose:
+            event_purpose_setted(msg_queue, purpose)
+
+    def run(self):
+        while self._wait_printer:
+            self._poll_pipe()
+            
+        self._event_ready()
+
+        while self._finished(): 
+            self._poll_pipe()
+
+            if self._paused:
+                time.sleep(0.5)
+                continue
+
+            if self._must_exit:
+                return
+
+            self._print_seconds_to_screen()
+            
+            time.sleep(1)
+            self._seconds -= 1
+
+            self._on_second_passed()
+
+        self._msg_queue.unsuscribe(getpid(), [event for event in Event])
+        event_timer_finished(self._msg_queue)
+
+    def _poll_pipe(self):
+        while self._pipe.poll():
+            msg = self._pipe.recv()
+            
+            match msg.kind:
+                case Event.PrinterReady:
+                    self._wait_printer = False
+
+                case Event.StopTimer:
+                    self._paused = True
+                    event_timer_stopped(self._msg_queue)
+                    print_app_msg(self._msg_queue,"Cuenta atrás pausada.")
+
+                case Event.ResumeTimer:
+                    self._paused = False
+                    event_timer_resumed(self._msg_queue, self._finish_time())
+                    print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
+
+                case Event.Termination:
+                    self._must_exit = True
+
+                case Event.PurposeAdded:
+                    self._purpose = msg.msg
+
+                case Event.TagChanged:
+                    self._tag = msg.msg
+
+    def _print_seconds_to_screen(self):
+        print_time(self._msg_queue, self._print_pending_time_msg())
+
+    def _print_pending_time_msg(self):
+        s=self._seconds
+        return "{:02d}:{:02d}:{:02d}".format(s//3600, (s//60) % 60, s % 60)
+
+    def _log_to_file(self, now):
+        text = self.pomo_log_line_entry(now)
+        with open(path_to_file(self._log_file), "a") as log:
+            log.write("\n" + text )
+            
+    def _print_pomodoro_finished(self, now):
+        print_app_msg(self._msg_queue, self.pomo_log_line_entry(now))
+
+    def pomo_log_line_entry(self, now):
+        date = now.strftime("%y-%m-%d")
+        time_str = now.strftime("%H:%M")
+        text = "🍅 {} , {}".format(date, time_str)
+        if self._tag:
+            text += " , #{}".format(self._tag)
+        if self._purpose:
+            if self._tag:
+                text += " , {}".format(self._purpose)
+            else:
+                text += " , , {}".format(self._purpose)
+
+        return text
+
+    def _event_ready(self):
+        time_str = self._finish_time_format(self._finish_time())
+        event_timer_initiated(self._msg_queue, time_str)
+
+    def _finish_time_format(self, pending_seconds):
+        t = datetime.now() + timedelta(seconds=pending_seconds)
+        return "{:02d}:{:02d}".format(t.hour, t.minute)
+
+    @abstractmethod
+    def _on_second_passed(self):
+        raise RuntimeError("Must be overriden")
+
+    @abstractmethod
+    def _finished(self):
+        raise RuntimeError("Must be overriden")
+
+    @abstractmethod
+    def _finish_time(self):
+        raise RuntimeError("Must be overriden")
+
+class Pomodoro(Countdown):
     def __init__(self, 
                  pomodoros,
                  msg_queue, 
@@ -33,58 +164,41 @@ class Pomodoro:
                  tag,
                  pomodoro_break_duration,
                  purpose):
-        self._msg_queue=msg_queue
-        self._pipe = msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
+        super().__init__(msg_queue, log_file, tag, purpose, pomodoro_time)
+
         self._pomodoro_time=pomodoro_time
-        self._log_file=log_file
-        self._tag=tag
         self._pomodoros=pomodoros
         self._pomodoro_break_duration=pomodoro_break_duration
-        self._purpose = purpose
+
+        self._on_break = False
         self._seconds = self._pomodoro_time * 60
 
-        self._wait_printer = True
-        self._must_exit = False
-        self._on_break = False
-        self._paused = False
+        event_pomodoro_setted(msg_queue, pomodoros)
 
-    def run(self):
-        while self._wait_printer:
-            self._poll_pipe()
-
-        self._set_pomodoro()
-
-        while 0 != self._pomodoros: 
-            self._poll_pipe()
-
-            if self._must_exit:
-                break
-            
-            if self._paused:
-                continue
-
-            self._print_seconds_to_screen()
-            
-            if self._is_pomodoro_ended():
-                now = datetime.now()
-                self._log_to_file(now)
-                self._print_pomodoro_finished(now)
-
-                self._pomodoros -= 1
-
-                if self._pomodoros != 0: 
-                    self._set_break()
-
-            elif self._is_break_ended():
-                event_break_finished(self._msg_queue)
-                self._set_pomodoro()
-
-            time.sleep(1)
-            self._seconds -= 1
-
-        self._msg_queue.unsuscribe(getpid(), [event for event in Event])
-        event_timer_finished(self._msg_queue)
+    def _finished(self):
+        return 0 != self._pomodoros
     
+    def _on_second_passed(self):
+        if self._is_pomodoro_ended():
+            now = datetime.now()
+            self._log_to_file(now)
+            self._print_pomodoro_finished(now)
+
+            event_pomodoro_finished(self._msg_queue)
+            self._pomodoros -= 1
+
+            if self._pomodoros != 0: 
+                self._set_break()
+
+        elif self._is_break_ended():
+            event_break_finished(self._msg_queue)
+            self._set_pomodoro()
+
+    def _finish_time(self):
+        pending_breaks = (self._pomodoros - 1) * self._pomodoro_break_duration * 60
+        pending_pomodoros = (self._pomodoros - 1) * self._pomodoro_time
+        return self._seconds + pending_breaks + pending_pomodoros
+
     def _set_pomodoro(self):
         self._on_break = False
         self._seconds = self._pomodoro_time * 60
@@ -96,59 +210,13 @@ class Pomodoro:
         event_audio_pomodoro_finished(self._msg_queue)
         event_break_begin(self._msg_queue)
 
-    def _poll_pipe(self):
-        while self._pipe.poll():
-            msg = self._pipe.recv()
-            match msg.kind:
-                case Event.PrinterReady:
-                    self._wait_printer = False
-
-                case Event.StopTimer:
-                    self._paused = True
-                    event_timer_stopped(self._msg_queue)
-                    print_app_msg(self._msg_queue,"Cuenta atrás pausada.")
-
-                case Event.ResumeTimer:
-                    self._paused = False
-                    event_timer_resumed(self._msg_queue, self._finish_time())
-                    print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
-
-                case Event.Termination:
-                    self._must_exit = True
-
-                case Event.PurposeAdded:
-                    self._purpose = msg.msg
-
-                case Event.TagChanged:
-                    self._tag = msg.msg
-
-    def _finish_time(self):
-        t = datetime.now() + timedelta(seconds=self._seconds)
-        return "{:02d}:{:02d}:{:02d}".format(t.hour, t.minute, t.second)
-
-    def _print_seconds_to_screen(self):
-        print_time(self._msg_queue, self._print_pending_time_msg())
-
-    def _print_pending_time_msg(self):
-        s=self._seconds
-        return "{:02d}:{:02d}:{:02d}".format(s//3600, (s//60) % 60, s % 60)
-
     def _is_pomodoro_ended(self):
         return not self._on_break and self._seconds == 0
 
     def _is_break_ended(self):
         return self._on_break and self._seconds == 0
 
-    def _log_to_file(self, now):
-        text = pomo_log_line_entry(now, self._tag, self._purpose)
-        with open(path_to_file(self._log_file), "a") as log:
-            log.write("\n" + text )
-            
-    def _print_pomodoro_finished(self, now):
-        text = pomo_log_line_entry(now, self._tag, self._purpose)
-        print_app_msg(self._msg_queue,text)
-
-class Timer:
+class Timer(Countdown):
     def __init__(self, 
                  minutes_count, 
                  msg_queue, 
@@ -156,120 +224,34 @@ class Timer:
                  log_file,
                  tag,
                  purpose):
+        super().__init__(msg_queue, log_file, tag, purpose, pomodoro_time)
+
         self._seconds=minutes_count*60
-        self._msg_queue=msg_queue
-        self._pipe = self._msg_queue.suscribe(*[event for event in Event], suscriber=getpid())
         self._pomodoro_time=pomodoro_time
-        self._log_file=log_file
-        self._tag=tag
-        self._purpose = purpose
-
-        self._wait_printer = True
         self._since_last_pomodoro = 0
-        self._paused = False
-        self._must_exit = False
 
-        if tag:
-            event_tag_setted(msg_queue,tag)
-        if purpose:
-            event_purpose_setted(msg_queue, purpose)
         event_pomodoro_setted(msg_queue, minutes_count // pomodoro_time)
 
-    def run(self):
-        while self._wait_printer:
-            self._poll_pipe()
-            
-        event_timer_initiated(self._msg_queue, self._finish_time())
-
-        while 0 <= self._seconds: 
-            self._poll_pipe()
-
-            if self._paused:
-                continue
-
-            if self._must_exit:
-                return
-
-            self._print_seconds_to_screen()
-            
-            if self._is_pomodoro_ended():
-                now = datetime.now()
-                self._log_to_file(now)
-                self._print_pomodoro_finished(now)
-                event_pomodoro_finished(self._msg_queue)
-
-                if 0 < self._seconds:
-                    event_audio_pomodoro_finished(self._msg_queue)
-
-                self._since_last_pomodoro = 0
-
-            time.sleep(1)
-            self._seconds -= 1
-            self._since_last_pomodoro += 1
-
-        self._msg_queue.unsuscribe(getpid(), [event for event in Event])
-        event_timer_finished(self._msg_queue)
-
-    def _poll_pipe(self):
-        while self._pipe.poll():
-            msg = self._pipe.recv()
-            
-            match msg.kind:
-                case Event.PrinterReady:
-                    self._wait_printer = False
-
-                case Event.StopTimer:
-                    self._paused = True
-                    event_timer_stopped(self._msg_queue)
-                    print_app_msg(self._msg_queue,"Cuenta atrás pausada.")
-
-                case Event.ResumeTimer:
-                    self._paused = False
-                    event_timer_resumed(self._msg_queue, self._finish_time())
-                    print_app_msg(self._msg_queue,"Cuenta atrás reanudada.")
-
-                case Event.Termination:
-                    self._must_exit = True
-
-                case Event.PurposeAdded:
-                    self._purpose = msg.msg
-
-                case Event.TagChanged:
-                    self._tag = msg.msg
+    def _finished(self):
+        return 0 <= self._seconds
 
     def _finish_time(self):
-        t = datetime.now() + timedelta(seconds=self._seconds)
-        return "{:02d}:{:02d}".format(t.hour, t.minute)
+        return self._seconds
 
-    def _print_seconds_to_screen(self):
-        print_time(self._msg_queue, self._print_pending_time_msg())
+    def _on_second_passed(self):
+        if self._is_pomodoro_ended():
+            now = datetime.now()
+            self._log_to_file(now)
+            self._print_pomodoro_finished(now)
+            event_pomodoro_finished(self._msg_queue)
 
-    def _print_pending_time_msg(self):
-        s=self._seconds
-        return "{:02d}:{:02d}:{:02d}".format(s//3600, (s//60) % 60, s % 60)
+            if 0 < self._seconds:
+                event_audio_pomodoro_finished(self._msg_queue)
+
+            self._since_last_pomodoro = 0
+
+        self._since_last_pomodoro += 1
 
     def _is_pomodoro_ended(self):
         pomodoro_in_seconds = 60 * self._pomodoro_time
         return pomodoro_in_seconds <= self._since_last_pomodoro
-
-    def _log_to_file(self, now):
-        text = pomo_log_line_entry(now, self._tag, self._purpose)
-        with open(path_to_file(self._log_file), "a") as log:
-            log.write("\n" + text )
-            
-    def _print_pomodoro_finished(self, now):
-        print_app_msg(self._msg_queue,pomo_log_line_entry(now,self._tag, self._purpose))
-
-def pomo_log_line_entry(now, tag, purpose=None):
-    date = now.strftime("%y-%m-%d")
-    time_str = now.strftime("%H:%M")
-    text = "🍅 {} , {}".format(date, time_str)
-    if tag:
-        text += " , #{}".format(tag)
-    if purpose:
-        if tag:
-            text += " , {}".format(purpose)
-        else:
-            text += " , , {}".format(purpose)
-
-    return text
