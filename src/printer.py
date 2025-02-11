@@ -2,6 +2,7 @@ from abc import abstractmethod, ABC
 from pyfiglet import Figlet
 import curses
 from curses import textpad
+import curses.ascii
 from datetime import datetime, timedelta
 import logging
 from os import getpid
@@ -754,9 +755,9 @@ class TagInputTile(Tile):
             # Capturar entrada del usuario
             key = self.window.getch()
 
-            if key == curses.KEY_UP and selected_idx > 0:
+            if (key == curses.KEY_UP or "k" == curses.ascii.unctrl(key)) and selected_idx > 0:
                 selected_idx -= 1
-            elif key == curses.KEY_DOWN and selected_idx < len(menu_items) - 1:
+            elif (key == curses.KEY_DOWN or "j" == curses.ascii.unctrl(key)) and selected_idx < len(menu_items) - 1:
                 selected_idx += 1
             elif key == ord("\n"):  # Enter para seleccionar
                 break
