@@ -1,4 +1,4 @@
-#!/opt/cmd_pomodoro/pyenv/bin/python3
+#!/opt/cmd_pomodoro/venv/bin/python3
 
 import time
 import sys

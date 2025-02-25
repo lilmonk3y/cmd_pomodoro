@@ -1,3 +1,4 @@
 pyenv/
 __pycache__/
 pyrightconfig.json 
+.python-version
